@@ -32,3 +32,16 @@ Architecture Decision Records (ADRs) for SUPER AGENT SYSTEM. Per PROJECT_CONTRAC
 **Consequences:**
 - Phase 6 (Completion Engine) must emit only values from this union; reason codes follow VERIFICATION.md s18.
 - A future governance revision should reconcile the two frozen lists explicitly.
+
+## ADR-003 — Phase 2 storage layout and update surface (2026-09-09)
+
+**Context:** INTERFACES.md s26 shows an example multi-file durable-state layout (task.json, state.json, plan.json, decisions.json, failures.json, verification.json, checkpoints/, continuity.json + derived Markdown). The Task Manager needs persistence in Phase 2, while the full Continuity Manager (Action Journal, hash-chained audit, recovery inspection) arrives in Phase 7.
+
+**Decision:**
+1. Durable state is one authoritative `task.json` per task (the full Task object) plus one integrity-protected file per checkpoint under `checkpoints/`, stored under `.pi/tasks/<task-id>/` by default (gitignored). Derived Markdown views are not generated yet.
+2. Every stored file is wrapped in an integrity envelope: `{"payload": <contract dict>, "integrity": {"algorithm": "sha256", "digest": <sha256 of canonical compact JSON>}}`. Loading fails closed on any tampering, malformed JSON, or schema violation (TaskIntegrityError).
+3. `TaskManager.update_task` has a deliberately narrow surface: plan, appended decisions/failures, verification state, continuity state, subtask links. State changes go through `transition()` only; target scopes go through `update_target_authorization()` which permits narrowing only (TASK_SCHEMA.md s15/s16).
+
+**Rationale:** Single authoritative file + integrity envelope gives tamper detection (SECURITY.md s27) and atomic durability (CONTINUITY.md s4) with minimal machinery. The multi-file layout and append-only hash-chained audit log remain Phase 7 Continuity Manager concerns; nothing here blocks that evolution.
+
+**Consequences:** The Phase 7 Continuity Manager may restructure storage (e.g., split files, hash chains) behind the TaskStore interface without changing the TaskManager contract. The envelope format must stay versioned (currently implicit v1).
