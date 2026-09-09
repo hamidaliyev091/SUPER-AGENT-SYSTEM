@@ -254,7 +254,7 @@ Exit Criteria
 
 Status
 
-NEXT
+COMPLETE
 
 ---
 
@@ -302,7 +302,7 @@ The system can safely execute a registered fake tool through the complete author
 
 Status
 
-PLANNED
+NEXT
 
 ---
 

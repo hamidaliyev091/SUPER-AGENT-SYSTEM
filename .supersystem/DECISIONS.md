@@ -45,3 +45,15 @@ Architecture Decision Records (ADRs) for SUPER AGENT SYSTEM. Per PROJECT_CONTRAC
 **Rationale:** Single authoritative file + integrity envelope gives tamper detection (SECURITY.md s27) and atomic durability (CONTINUITY.md s4) with minimal machinery. The multi-file layout and append-only hash-chained audit log remain Phase 7 Continuity Manager concerns; nothing here blocks that evolution.
 
 **Consequences:** The Phase 7 Continuity Manager may restructure storage (e.g., split files, hash chains) behind the TaskStore interface without changing the TaskManager contract. The envelope format must stay versioned (currently implicit v1).
+
+## ADR-004 — Policy Engine decisions (2026-09-09)
+
+**Context:** Phase 3 implements the POLICY_RULES.md s46 evaluation pipeline verbatim. Four points needed explicit, recorded decisions because the frozen documents leave them to implementation judgment or produce conservative literal results.
+
+**Decisions:**
+1. **Executable task-state set** = {RUNNING, OBSERVING, VERIFYING, REPAIRING}. POLICY.md s5 lists only the states that must not permit execution; the lifecycle specification shows execution begins at RUNNING. RECOVERING requires recovery validation before continuation (CONTINUITY.md s27), so it is excluded. PLANNING/READY precede execution and are excluded.
+2. **Undefined matrix rows are DENY, literally.** Operations whose registry rows lack reversibility/idempotency values (process.*, termux_api.send_notification, settings.write, package.install) fall on matrix rows that do not exist (e.g. MEDIUM MUTATING IRREVERSIBLE) and therefore evaluate to DENY in every mode (POLICY_RULES.md s20). No classifications were invented (s1: "The Policy Engine MUST NOT invent missing rules"). A governance revision may add explicit reversibility/idempotency values to re-enable these operations.
+3. **Filesystem deletion has no v1 authorizing scope.** The TargetAuthorizationContext has read/write/search scopes only, and P-RULE-18 forbids treating write scope as delete scope. fs.delete_file / fs.delete_directory therefore always DENY in v1. Accessibility tap/type_text/submit follow their s31 operation-specific ASK rules.
+4. **Protected-path runtime mapping is mandatory before filesystem mutation** (PROTECTED_PATHS.md s14): missing (P-RULE-51), ambiguous (P-RULE-52), or stale (P-RULE-53) mappings DENY all filesystem mutation. Reads are not blocked by the protected registry (PROTECTED_PATHS.md s18). The environmentContext of a PolicyRequest is untrusted data and is never read for authority (P-RULE-14).
+
+**Consequences:** v1 policy is intentionally strict; the registry data in `src/policy/registry.py` is the single place where a future governance revision changes classifications. Phase 4 (Execution Pipeline) wires audit-before-execution and the Action Journal around this engine without changing its semantics.
