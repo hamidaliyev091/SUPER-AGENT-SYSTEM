@@ -161,7 +161,7 @@ Exit Criteria
 
 Status
 
-NEXT
+COMPLETE
 
 ---
 
@@ -197,7 +197,7 @@ The Task Manager correctly enforces the lifecycle defined by TASK_SCHEMA.md.
 
 Status
 
-PLANNED
+NEXT
 
 ---
 
