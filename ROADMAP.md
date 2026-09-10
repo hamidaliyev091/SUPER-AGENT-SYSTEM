@@ -392,7 +392,7 @@ Exit Criteria
 
 Status
 
-NEXT
+COMPLETE
 
 ---
 
@@ -460,7 +460,7 @@ The system can safely recover after:
 
 Status
 
-PLANNED
+NEXT
 
 ---
 

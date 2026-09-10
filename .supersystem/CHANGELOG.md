@@ -88,3 +88,17 @@ All notable project changes. Dates are UTC.
 
 ### Notes
 - ADR-006 records the verification design decisions (assessor registry, always-fresh collection, identity-based independence, journal-first invalidation).
+
+## 2026-09-10 — Phase 6 Completion Engine
+
+### Added
+- `src/completion/compliance.py` — completion-time compliance checks over authoritative durable records: every ACTION_STARTED must be audited by a preceding non-DENY POLICY_DECISION (with approval records for ASK); resource consumption derived from verified journal records against the externally enforced limits; unrecorded dimensions with set limits fail closed (s13-s16).
+- `src/completion/store.py` — CompletionDecisionStore: latest decision per task behind the SHA-256 integrity envelope; tampered decisions fail closed on load.
+- `src/completion/engine.py` — CompletionEngine implementing INTERFACES s20: `evaluate(taskId)` checks every applicable DONE condition (s19) in deterministic precedence order (journal integrity -> VERIFYING state -> Completion Contract -> versions known -> critical failures -> durable verification results -> policy compliance -> resource compliance -> mutation staleness -> evidence provenance -> per-criterion PASS/evidence/independence). DONE is journaled (COMPLETION_DECISION), stored behind an integrity envelope, reloaded and integrity-validated, and only then applied via TaskManager.transition(by_completion_engine=True). INCONCLUSIVE structurally cannot produce DONE; only this engine passes the by_completion_engine flag.
+- `tests/unit/test_completion_engine.py` — 17 new tests: DONE authorization, model-cannot-declare-DONE, INCONCLUSIVE-never-DONE, REPAIR on mandatory FAIL, WAITING_USER on missing independent evidence, FAILED on critical failure / resource overrun, BLOCKED on policy violation / tampered journal / tampered results / invalid contract, staleness -> re-verification, decision tampering detection. Full suite: 235 tests passing on Termux (Python 3.14.6).
+
+### Changed
+- ROADMAP.md: Phase 6 status NEXT → COMPLETE; Phase 7 (Continuity and Recovery) → NEXT.
+
+### Notes
+- ADR-007 records the decision-value mapping and the check precedence order.
