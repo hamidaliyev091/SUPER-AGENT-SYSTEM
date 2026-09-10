@@ -57,3 +57,22 @@ Architecture Decision Records (ADRs) for SUPER AGENT SYSTEM. Per PROJECT_CONTRAC
 4. **Protected-path runtime mapping is mandatory before filesystem mutation** (PROTECTED_PATHS.md s14): missing (P-RULE-51), ambiguous (P-RULE-52), or stale (P-RULE-53) mappings DENY all filesystem mutation. Reads are not blocked by the protected registry (PROTECTED_PATHS.md s18). The environmentContext of a PolicyRequest is untrusted data and is never read for authority (P-RULE-14).
 
 **Consequences:** v1 policy is intentionally strict; the registry data in `src/policy/registry.py` is the single place where a future governance revision changes classifications. Phase 4 (Execution Pipeline) wires audit-before-execution and the Action Journal around this engine without changing its semantics.
+
+## ADR-005 — External architecture study: adopt patterns, reject code reuse (2026-09-10)
+
+**Context:** Before Phase 4, a comparative study of mature open-source agent runtimes was performed against SAS requirements (authority model, fail-closed policy, durable state, verification, protected targets).
+
+**Studied systems and findings:**
+
+1. **OpenHands (MIT)** — event-stream architecture (actions/observations as causal event pairs), append-only JSONL event persistence with session markers ("event sourcing = free recovery"), secrets redaction before storage, SecurityAnalyzer + confirmation mode (WAITING_FOR_CONFIRMATION, approve/reject pending actions). Weakness relative to SAS: its LLM-annotated `security_risk` tool parameter makes risk classification model-trusted — a documented crash class (issue #11309) when the analyzer is missing. SAS resolves authoritative risk from the versioned registry and treats model-requested risk as informational only.
+2. **LangGraph / langchain (MIT)** — durable execution via checkpointers and thread ids; "sync" durability mode (persist before continuing) matching SAS write-through discipline; interrupt()/Command(resume) with per-node restart. Weakness: pre-interrupt side effects must be idempotent by *developer discipline*; SAS enforces the equivalent guarantee with UNKNOWN side-effect state and no-blind-replay journal rules.
+3. **Letta / MemGPT (Apache-2.0)** — typed persistent memory blocks (persona/human/task), agent-scoped (not conversation-scoped) memory, git-backed memory auditability, sleep-time compute. Relevant to the Phase 7 Continuity Brief and later memory phases; not needed for Phase 4.
+4. **No strong prior art found for SAS-style verification/completion authority** — surveyed frameworks rely on model self-claims or human judgment for completion. The SAS Verification Engine + Completion Engine design (VERIFICATION.md) remains the strictest approach seen and is retained unchanged.
+
+**Decision: proceed with the current architecture; adopt patterns, reject code reuse.**
+
+Adopted into Phase 4: (a) append-only per-task journal with sequential ids and task identity (OpenHands event sourcing shape, plus the SECURITY.md s22.2 hash chain OpenHands lacks); (b) arguments hashed before journal storage — never raw (OpenHands redaction + POLICY_RULES s43); (c) causal action→terminal linking via actionId; (d) sync write-through before execution (LangGraph "sync" mode + CONTINUITY.md s8.2). ExecutionResult carries structured outcome state for replay/observation.
+
+Rejected: importing OpenHands, LangGraph, Letta, or their components as dependencies. Reasons: all three are heavyweight, multi-dependency frameworks that would violate PROJECT_CONTRACT s2.1-s2.3 (Core must not depend on a runtime/model framework) and burden the stdlib-only Core on Termux; their security models are materially weaker than SAS policy (model-trusted risk; no integrity-protected audit chain). Their licenses (MIT, MIT, Apache-2.0 respectively) would permit reuse, but reuse is not technically justified. No third-party source code was copied; no copyright notices are required. Provenance: study performed 2026-09-10 via official docs/repos (OpenHands GitHub + SDK docs; LangGraph durable-execution/interrupts docs; Letta docs/MemGPT materials).
+
+**Consequences:** `src/continuity/journal.py` is the single durable audit mechanism (policy decisions, approvals, action STARTED/terminal) and the authoritative source for resource accounting (action-step counts derived from verified records). Phase 7 extends recovery on top of it; observability (Phase 18) reads it.

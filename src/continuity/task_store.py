@@ -151,3 +151,10 @@ class TaskStore:
             except ValidationError as exc:
                 raise TaskIntegrityError(f"{path}: checkpoint failed schema validation: {exc}") from None
         return checkpoints
+
+    # -- journals -----------------------------------------------------------
+
+    def journal_for(self, task_id: str) -> Journal:
+        """The hash-chained action journal for a task (Phase 4)."""
+        from .journal import Journal
+        return Journal(self._task_dir(task_id) / "journal.jsonl")

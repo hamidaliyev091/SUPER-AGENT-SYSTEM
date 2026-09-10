@@ -26,6 +26,7 @@ from typing import Dict, Optional, Tuple
 
 from core import (
     ApprovalRequest,
+    ApprovalResult,
     PolicyDecision,
     PolicyRequest,
     Reversibility,
@@ -36,8 +37,10 @@ from core import (
     TargetType,
     Idempotency,
     PolicyDecisionValue,
+    parse_iso,
     utcnow_iso,
 )
+from core.enums import ApprovalDecision
 from core.versions import PROTECTED_PATHS_REGISTRY_VERSION, POLICY_VERSION, RULE_VERSION
 
 from .canonical import Canonicalizer, match_scope
@@ -297,3 +300,25 @@ class PolicyEngine:
             ruleVersion=request.ruleVersion,
             approvalRequirement=approval,
         )
+
+    def validate_approval(self, approval_request: ApprovalRequest,
+                          approval_result: ApprovalResult) -> Optional[str]:
+        """Policy validation of a collected approval (INTERFACES s10/s21,
+        SECURITY s8). Returns None when valid, otherwise the failure reason.
+        Single-use consumption is enforced by the pipeline via the journal."""
+        if not isinstance(approval_result, ApprovalResult):
+            return "approval result malformed"
+        if approval_result.approvalReference != approval_request.approvalReference:
+            return "approval reference mismatch"
+        if approval_result.decision is not ApprovalDecision.APPROVE:
+            return "approval not granted"
+        if not approval_result.approverIdentity or not approval_result.approverIdentity.actorId.strip():
+            return "approver identity missing"
+        expires_at = parse_iso(approval_request.expiresAt)
+        if expires_at is None:
+            return "approval expiry unparseable"
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) >= expires_at:
+            return "approval expired"
+        return None

@@ -302,7 +302,7 @@ The system can safely execute a registered fake tool through the complete author
 
 Status
 
-NEXT
+COMPLETE
 
 ---
 
@@ -347,7 +347,7 @@ The system can detect that an executed action succeeded technically but failed t
 
 Status
 
-PLANNED
+NEXT
 
 ---
 
