@@ -73,3 +73,18 @@ All notable project changes. Dates are UTC.
 
 ### Notes
 - ADR-005 records the external architecture study (OpenHands, LangGraph, Letta): patterns adopted, no third-party code reused, no dependencies added (licenses MIT/MIT/Apache-2.0 would permit reuse but it was not technically justified).
+
+## 2026-09-10 — Phase 5 Verification Engine
+
+### Added
+- `src/verification/methods.py` — VerificationMethodSpec registry: each criterion's verificationMethod names a spec (evidence-collection tool + arguments + a deterministic code assessor). Assessors evaluate observed state against the actual requirement; "tool returned success" is an observation, never verification (ROADMAP Phase 5).
+- `src/verification/engine.py` — VerificationEngine implementing INTERFACES s19: `verify(taskId, criteria)` evaluates every criterion against freshly collected, policy-governed evidence; `collectEvidence` routes collection through the ExecutionPipeline (VERIFICATION.md s12.1 — verification cannot bypass Policy); `assessIndependence` derives evidence level from collector identity (engine = LEVEL_1, registered separate verifier = LEVEL_2, acting side = LEVEL_0); `invalidate` journals and tombstones stale results. PASS is granted only when every mandatory criterion PASSes with sufficient independence; HIGH/CRITICAL criteria additionally require full provenance metadata (s8). Results are journaled (VERIFICATION_RESULT with content digest) before being written to SHA-256 integrity envelopes.
+- `src/verification/result_store.py` — latest result per criterion under `.pi/tasks/<task>/verification/` behind the same integrity envelope as task state; tampered results fail closed on load.
+- `src/verification/independence.py` — IndependenceResult + level-by-collector-identity assessment (VERIFICATION.md s9).
+- `tests/unit/test_verification_engine.py` — 23 new tests incl. the Phase 5 exit criterion (a technically successful action whose output fails the actual requirement is detected as FAIL), INCONCLUSIVE-never-PASS, HIGH-risk independent-evidence requirement, acting-model-claims insufficiency, policy denial of evidence collection, mutation invalidation, result tampering detection, journal-failure fail-closed. Full suite: 218 tests passing on Termux (Python 3.14.6).
+
+### Changed
+- ROADMAP.md: Phase 5 status NEXT → COMPLETE; Phase 6 (Completion Engine) → NEXT.
+
+### Notes
+- ADR-006 records the verification design decisions (assessor registry, always-fresh collection, identity-based independence, journal-first invalidation).

@@ -347,7 +347,7 @@ The system can detect that an executed action succeeded technically but failed t
 
 Status
 
-NEXT
+COMPLETE
 
 ---
 
@@ -392,7 +392,7 @@ Exit Criteria
 
 Status
 
-PLANNED
+NEXT
 
 ---
 
