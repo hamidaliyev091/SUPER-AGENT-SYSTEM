@@ -148,3 +148,18 @@ All notable project changes. Dates are UTC.
 
 ### Notes
 - ADR-012 records the package-naming gotcha, the v1 tool-exposure policy (only registry-complete rows), and the durable-session design.
+
+## 2026-09-17 — Phase 13 Termux:API
+
+### Added
+- `tests/integration/test_termux_api.py` — LIVE device test: real termux-battery-status output flows through policy -> audit -> verification -> completion -> DONE (skipped when the binary is absent); plus the notification fail-closed test: termux_api.send_notification stays DENY (no complete matrix row, ADR-004) even when a tool is registered - the tool is never reached.
+- `src/platforms/termux/e2e_demo.py` — on-device end-to-end demonstration (Phase 12 exit criterion): complete governed task with the REAL filesystem adapter (real writes, real reads) from creation to verified DONE. Ran successfully on the device: 9 journal records, final COMPLETION_DECISION.
+- `src/models/scripted.py` — ScriptedModelPort moved from tests to src/models as the reference ModelPort adapter (demos and tests share it).
+
+### Changed
+- `src/verification/engine.py` — FIXED cross-criterion staleness: verify() now collects evidence for ALL criteria first, then assesses and persists results. Previously a later criterion's evidence-collection action was journaled after an earlier criterion's result and falsely marked it stale (RECOVERY_REQUIRES_REVERIFICATION).
+- `src/runtime` renamed to `src/runtimes` (same stdlib/self-shadowing class as platforms: a script inside the package put its own directory ahead of PYTHONPATH).
+- ROADMAP.md: Phase 13 status NEXT → COMPLETE; Phase 14 (Android Capability Layer) → NEXT.
+
+### Notes
+- ADR-013 records the two-phase verification fix.

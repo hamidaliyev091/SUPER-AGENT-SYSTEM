@@ -143,3 +143,11 @@ Rejected: importing OpenHands, LangGraph, Letta, or their components as dependen
 3. **TermuxRuntimeAdapter sessions are durable and integrity-enveloped.** Sessions persist under .pi/sessions/ with the standard envelope, so a killed/backgrounded Termux process restarts sessions without losing state (CONTINUITY s21, s22). send() produces normalized RuntimeEvents from the bound ModelPort; the adapter holds no authority of its own.
 
 **Consequences:** Phase 13 (Termux:API) registers the remaining structured API tools as their policy rows permit, and Phase 14 (Android capabilities) follows the same exposure rule: registry-complete rows only, everything through the ExecutionPipeline.
+
+## ADR-013 — Two-phase verification collection (2026-09-17)
+
+**Context:** The live Termux:API test exposed a cross-criterion defect: verify() evaluated criteria sequentially (collect -> assess -> persist per criterion), so a later criterion's evidence-collection ACTION_STARTED was journaled after an earlier criterion's VERIFICATION_RESULT. The Completion Engine's staleness check (s20) then correctly - but wrongly in intent - flagged the earlier criterion as verified-before-later-actions, blocking DONE on a fresh, successful verification pass.
+
+**Decision:** verify() is now two-phase: Phase A collects evidence for every selected criterion (all policy-governed actions journaled first), Phase B assesses and durably persists each result. All results are therefore written after all collection actions, so a single verification pass can never self-invalidate. Mutations between passes still invalidate (Phase 6 staleness unchanged).
+
+**Consequences:** Verification results describe one coherent snapshot of observed state. The Phase 6 staleness semantics are untouched; multi-criterion tasks (the common case for real objectives) now complete deterministically.

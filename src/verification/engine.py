@@ -111,9 +111,30 @@ class VerificationEngine:
             report.notes.append("no success criteria to verify")
             return report
         journal = self.store.journal_for(taskId)
+        # Phase A: collect evidence for EVERY criterion first, so all
+        # evidence-collection actions are journaled before any result is
+        # written. Otherwise a later criterion's collection would look like
+        # a post-verification mutation of an earlier criterion (s20).
+        collected = []
         for criterion in selected:
+            spec = self.methods.get(criterion.verificationMethod)
+            if spec is None:
+                collected.append((criterion, spec, [], None,
+                                  f"no verification method registered for "
+                                  f"{criterion.verificationMethod!r}"))
+                continue
             try:
-                result = self._verify_criterion(task, criterion, journal, timestamp)
+                self._record_invalidations(task, criterion, journal)
+                evidence, tool_result, problem = self._collect_evidence(task, criterion)
+                collected.append((criterion, spec, evidence, tool_result, problem))
+            except JournalError as exc:
+                collected.append((criterion, spec, [], None,
+                                  f"journal failure: {exc}"))
+        # Phase B: assess and durably persist each result.
+        for criterion, spec, evidence, tool_result, problem in collected:
+            try:
+                result = self._assess(task, criterion, spec, evidence,
+                                      tool_result, problem, timestamp)
                 self._persist(taskId, result, journal)
             except (JournalError, OSError) as exc:
                 result = self._result(
@@ -173,17 +194,10 @@ class VerificationEngine:
 
     # -- per-criterion evaluation ---------------------------------------------
 
-    def _verify_criterion(self, task, criterion, journal, timestamp) -> VerificationResult:
-        spec = self.methods.get(criterion.verificationMethod)
-        if spec is None:
-            return self._result(
-                task, criterion, VerificationStatus.INCONCLUSIVE,
-                IndependenceLevel.LEVEL_0_SELF, [], timestamp,
-                f"no verification method registered for {criterion.verificationMethod!r}")
-
-        self._record_invalidations(task, criterion, journal)
-
-        evidence, tool_result, problem = self._collect_evidence(task, criterion)
+    def _assess(self, task, criterion, spec, evidence, tool_result, problem,
+                timestamp) -> VerificationResult:
+        """Evaluate one criterion against its collected evidence (Phase B:
+        collection happened in Phase A for every criterion)."""
         if problem is not None:
             return self._result(task, criterion, VerificationStatus.INCONCLUSIVE,
                                 self._best_level(evidence), evidence, timestamp,

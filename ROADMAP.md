@@ -710,7 +710,7 @@ Termux:API operations use the same authorization and execution pipeline.
 
 Status
 
-NEXT
+COMPLETE
 
 ---
 
@@ -767,7 +767,7 @@ Each Android capability has:
 
 Status
 
-PLANNED
+NEXT
 
 ---
 

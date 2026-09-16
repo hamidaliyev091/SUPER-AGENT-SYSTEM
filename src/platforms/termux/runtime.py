@@ -21,7 +21,7 @@ from continuity.task_store import (
 )
 from core import ModelRequest, RuntimeEvent, RuntimeSession, utcnow_iso
 from core.enums import ModelRole
-from runtime import RuntimePort
+from runtimes import RuntimePort
 
 
 class TermuxRuntimeAdapter(RuntimePort):

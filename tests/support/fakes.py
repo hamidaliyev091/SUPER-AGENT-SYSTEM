@@ -200,27 +200,7 @@ class FakeRuntime:
         return dict(self.environment)
 
 
-class ScriptedModelPort:
-    """ModelPort implementation over a script of ToolCalls (test double /
-    reference adapter). Each generate() consumes one scripted turn."""
-
-    def __init__(self, turns=None, usage=None, identity="scripted-port"):
-        self._turns = list(turns or [])
-        self.identity = identity
-        self.usage = usage or {"inputTokens": 1, "outputTokens": 1}
-        self.requests = []
-
-    def generate(self, request):
-        from core import ModelResponse
-        self.requests.append(request)
-        if not self._turns:
-            return ModelResponse(content="", toolCalls=[],
-                                 usage=self.usage, finishReason="stop")
-        tool_calls = self._turns.pop(0)
-        if not isinstance(tool_calls, (list, tuple)):
-            tool_calls = [tool_calls]
-        return ModelResponse(content="", toolCalls=list(tool_calls),
-                             usage=self.usage, finishReason="tool_calls")
+from models import ScriptedModelPort  # reference port adapter
 
 
 class FakeRuntimeAdapter:
