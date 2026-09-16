@@ -131,3 +131,15 @@ Rejected: importing OpenHands, LangGraph, Letta, or their components as dependen
 5. **ROADMAP status PARTIAL is used for Phases 10/11.** Exit criteria genuinely require external systems; marking them COMPLETE would be false, marking them PLANNED would hide the finished Core-side work. The next agent working on this must obtain (a) the pi-ultracode API for PiRuntimeAdapter and (b) provider access for DeepSeek/Claude/Gemini adapters.
 
 **Consequences:** Phase 12 (Termux Runtime) can proceed without external dependencies; Phase 11 provider adapters are thin translation layers over HTTP client libraries when keys arrive. The Core's replaceability is now proven at three boundaries: runtime (FakeRuntimeAdapter), model (ScriptedModelPort), and platform (Phase 8 static check).
+
+## ADR-012 — Termux platform adapter decisions (2026-09-17)
+
+**Context:** Phase 12 builds the Termux platform layer. Three structural decisions needed recording.
+
+**Decisions:**
+
+1. **Package name is platforms, never platform.** A top-level platform package shadows the stdlib platform module (imported by uuid and others) and breaks the interpreter. This is a permanent constraint for any future platform code.
+2. **v1 exposes only registry-complete operations.** The filesystem adapter registers read/stat/list/write; deletion is omitted because it has no v1 authorizing scope (ADR-004). The environment adapter exposes only battery/wifi/device status - the termux_api rows with complete classifications. process.* remains unregistered (DENY by matrix construction, ADR-004). The adapters therefore cannot even be reached for operations the policy layer would deny; defense in depth, not a substitute for policy.
+3. **TermuxRuntimeAdapter sessions are durable and integrity-enveloped.** Sessions persist under .pi/sessions/ with the standard envelope, so a killed/backgrounded Termux process restarts sessions without losing state (CONTINUITY s21, s22). send() produces normalized RuntimeEvents from the bound ModelPort; the adapter holds no authority of its own.
+
+**Consequences:** Phase 13 (Termux:API) registers the remaining structured API tools as their policy rows permit, and Phase 14 (Android capabilities) follows the same exposure rule: registry-complete rows only, everything through the ExecutionPipeline.

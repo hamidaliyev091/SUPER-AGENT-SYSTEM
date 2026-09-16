@@ -676,7 +676,7 @@ The complete agent can execute inside Termux using the existing Core.
 
 Status
 
-NEXT
+COMPLETE
 
 ---
 
@@ -710,7 +710,7 @@ Termux:API operations use the same authorization and execution pipeline.
 
 Status
 
-PLANNED
+NEXT
 
 ---
 

@@ -133,3 +133,18 @@ All notable project changes. Dates are UTC.
 
 ### Notes
 - ADR-011 records the port-layer decisions, including MODEL_CALL accounting and the PARTIAL status rationale.
+
+## 2026-09-17 — Phase 12 Termux Runtime
+
+### Added
+- `src/platforms/termux/filesystem.py` — TermuxFilesystemAdapter: real fs.read_file/list_directory/stat/write_file tools over the device filesystem via pathlib. Mutation tools register only with a concrete versioned protected-path mapping (PROTECTED_PATHS s14); deletion tools are omitted (no v1 delete scope, ADR-004). Failures are KNOWN_FAILED ToolResults, never escaping exceptions.
+- `src/platforms/termux/environment.py` — TermuxEnvironmentAdapter: termux_api.battery_status/wifi_status/device_info backed by Termux:API binaries (the three registry rows with complete classifications). Missing binaries report TERMUX_API_UNAVAILABLE - never a fake success.
+- `src/platforms/termux/runtime.py` — TermuxRuntimeAdapter: RuntimePort with durable integrity-enveloped sessions under `.pi/sessions/`; sessions survive process restarts and Termux backgrounding (foundation for background execution); binds a ModelPort for normalized tool-call events; local-storage accounting helper.
+- `tests/integration/test_termux_platform.py` — 8 tests: real filesystem tools through policy, protected-mapping enforcement on real paths, KNOWN_FAILED filesystem errors, Termux:API unavailable/parsing branches, durable sessions across adapter restarts, tampered session fail-closed, model-port events through the runtime.
+- NOTE: the package is `src/platforms/` (not `platform`) - a top-level `platform` package shadows Python's stdlib platform module (imported by uuid) and breaks the interpreter.
+
+### Changed
+- ROADMAP.md: Phase 12 status NEXT → COMPLETE; Phase 13 (Termux:API) → NEXT.
+
+### Notes
+- ADR-012 records the package-naming gotcha, the v1 tool-exposure policy (only registry-complete rows), and the durable-session design.
