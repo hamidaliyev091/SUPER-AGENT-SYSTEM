@@ -198,3 +198,78 @@ class FakeRuntime:
 
     def environment_context(self) -> dict:
         return dict(self.environment)
+
+
+class ScriptedModelPort:
+    """ModelPort implementation over a script of ToolCalls (test double /
+    reference adapter). Each generate() consumes one scripted turn."""
+
+    def __init__(self, turns=None, usage=None, identity="scripted-port"):
+        self._turns = list(turns or [])
+        self.identity = identity
+        self.usage = usage or {"inputTokens": 1, "outputTokens": 1}
+        self.requests = []
+
+    def generate(self, request):
+        from core import ModelResponse
+        self.requests.append(request)
+        if not self._turns:
+            return ModelResponse(content="", toolCalls=[],
+                                 usage=self.usage, finishReason="stop")
+        tool_calls = self._turns.pop(0)
+        if not isinstance(tool_calls, (list, tuple)):
+            tool_calls = [tool_calls]
+        return ModelResponse(content="", toolCalls=list(tool_calls),
+                             usage=self.usage, finishReason="tool_calls")
+
+
+class FakeRuntimeAdapter:
+    """RuntimePort implementation (INTERFACES s16) over a ModelPort: the
+    runtime exposes sessions and turns of normalized events, and every
+    tool call flows through the Core pipeline. Proves the Core operates
+    through the port with unchanged security semantics (Phase 10)."""
+
+    def __init__(self, name, port):
+        self.name = name
+        self.port = port
+        self.sessions = {}
+
+    def start(self, task_context):
+        from core import RuntimeSession
+        import uuid
+        session = RuntimeSession(sessionId=uuid.uuid4().hex,
+                                 taskContext=dict(task_context), state="RUNNING")
+        self.sessions[session.sessionId] = session
+        return session
+
+    def send(self, session_id, input=None):
+        from core import ModelRequest, RuntimeEvent, utcnow_iso
+        from core.enums import ModelRole
+        from models import ModelPort
+        if session_id not in self.sessions:
+            raise KeyError(f"unknown session {session_id}")
+        context = self.sessions[session_id].taskContext
+        request = ModelRequest(
+            role=ModelRole.GENERAL_AGENT,
+            messages=[{"role": "runtime", "content": str(input or "")}],
+            context={"taskId": context.get("taskId")},
+        )
+        response = self.port.generate(request)
+        now = utcnow_iso()
+        return [RuntimeEvent(type="tool_calls", payload={
+            "toolCalls": [c.to_dict() for c in response.toolCalls],
+            "finishReason": response.finishReason,
+            "usage": response.usage,
+        }, timestamp=now)]
+
+    def stop(self, session_id):
+        if session_id not in self.sessions:
+            return {"ok": False, "reason": "unknown session"}
+        self.sessions[session_id].state = "STOPPED"
+        return {"ok": True}
+
+    def resume(self, session_id):
+        if session_id not in self.sessions:
+            raise KeyError(f"unknown session {session_id}")
+        self.sessions[session_id].state = "RUNNING"
+        return self.sessions[session_id]

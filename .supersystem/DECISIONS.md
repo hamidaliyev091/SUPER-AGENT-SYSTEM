@@ -117,3 +117,17 @@ Rejected: importing OpenHands, LangGraph, Letta, or their components as dependen
 5. **The orchestrator holds no authority of its own**: no direct tool calls, no transitions to DONE, no criteria/limit mutation surfaces. Phase 11 swaps the scripted model double for ModelPort without touching these mechanics.
 
 **Consequences:** Phase 10 (Pi runtime) and Phase 11 (real models) integrate at the model/runtime boundary only; the loop, policy, verification, and completion semantics are proven Core-side.
+
+## ADR-011 — ModelPort/RuntimePort layer decisions (2026-09-17)
+
+**Context:** Phases 10 (Pi Runtime) and 11 (Real Model Integration) require external systems for their full exit criteria (the actual pi-ultracode runtime and provider API keys). Everything implementable Core-side was built; the concrete adapters are explicitly out of reach without those systems. This ADR records both the design and the honest partial status.
+
+**Decisions:**
+
+1. **Port contracts live in core/contracts.py.** ToolCall, ModelRequest, ModelResponse, RuntimeSession, RuntimeEvent are provider/runtime-independent shapes (INTERFACES s14/s16); putting them in Core enforces that adapters depend on Core, never the reverse (ARCHITECTURE s5.10 fitness function).
+2. **Every model call is journaled (MODEL_CALL) before its response is used.** The ModelPortDriver records role + usage + finishReason, closing the modelCalls dimension of TASK_SCHEMA s20. Completion resource compliance now counts MODEL_CALL events; exceeding the limit fails completion. (ADR-007's unrecorded-dimension note is superseded for modelCalls; retryCount/delegationCount/network/storage remain unrecorded.)
+3. **Tool-call translation grants nothing.** ModelPortDriver converts ToolCalls to ActionRequests with actor identity '<role>-port'; policy still evaluates everything (s12). A 'strong' model or a router selection changes no permissions, limits, or verification requirements (s15).
+4. **ModelRouter binds its role in the driver.** The router's generate(role, request) differs from ModelPort.generate(request); the driver wraps routers at construction, keeping one uniform port surface for the orchestrator.
+5. **ROADMAP status PARTIAL is used for Phases 10/11.** Exit criteria genuinely require external systems; marking them COMPLETE would be false, marking them PLANNED would hide the finished Core-side work. The next agent working on this must obtain (a) the pi-ultracode API for PiRuntimeAdapter and (b) provider access for DeepSeek/Claude/Gemini adapters.
+
+**Consequences:** Phase 12 (Termux Runtime) can proceed without external dependencies; Phase 11 provider adapters are thin translation layers over HTTP client libraries when keys arrive. The Core's replaceability is now proven at three boundaries: runtime (FakeRuntimeAdapter), model (ScriptedModelPort), and platform (Phase 8 static check).

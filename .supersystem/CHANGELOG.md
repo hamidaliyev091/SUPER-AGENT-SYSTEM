@@ -117,3 +117,19 @@ All notable project changes. Dates are UTC.
 
 ### Notes
 - ADR-010 records the orchestrator loop semantics (one action per RUNNING pass, observation stage, CONTINUE re-entry, human states stop the loop, claims never read).
+
+## 2026-09-17 — Phases 10/11 Core side: RuntimePort and ModelPort
+
+### Added
+- `src/core/contracts.py` — ToolCall, ModelRequest, ModelResponse, RuntimeSession, RuntimeEvent contracts (INTERFACES s14/s16), provider- and runtime-independent.
+- `src/models/` — ModelPort (s14: the Core never knows the provider), ModelRouter (s15: role dispatch; selection grants no authority), ModelPortDriver (adapts a port to the orchestrator; journals every MODEL_CALL with usage so model-call limits are externally enforceable; a ModelRouter binds its role at dispatch).
+- `src/runtime/` — RuntimePort (s16: start/send/stop/resume session interface; the Core imports no runtime-specific code).
+- `tests/support/fakes.py` — ScriptedModelPort (reference port over scripted ToolCall turns) and FakeRuntimeAdapter (RuntimePort implementation exposing normalized tool-call events), replacing the plain FakeModel at the integration boundary.
+- `src/completion/compliance.py` — modelCalls is now a recorded dimension: MODEL_CALL journal events are counted against the limit; exceeding it fails completion (RESOURCE_LIMIT_EXCEEDED). retryCount/delegationCount/network/storage remain unrecorded.
+- `tests/integration/test_model_port_flows.py` — 7 tests: orchestrator driven through ModelPort (happy path), model-call accounting + enforcement (repair loop exceeds the budget -> no DONE; within budget -> DONE), malicious tool calls through the port DENIED, router dispatch with no authority from selection, runtime-adapter sessions/events, runtime-driven full flow.
+
+### Changed
+- ROADMAP.md: Phases 10 and 11 marked PARTIAL (Core-side complete; concrete PiRuntimeAdapter and provider adapters require the external systems - pi-ultracode API and provider keys). Phase 12 (Termux Runtime) -> NEXT.
+
+### Notes
+- ADR-011 records the port-layer decisions, including MODEL_CALL accounting and the PARTIAL status rationale.

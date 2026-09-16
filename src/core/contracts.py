@@ -21,6 +21,7 @@ from .enums import (
     EffortLevel,
     Idempotency,
     IndependenceLevel,
+    ModelRole,
     PermissionMode,
     PolicyDecisionValue,
     Reversibility,
@@ -576,3 +577,49 @@ class CompletionDecision(_Contract):
     verificationReferences: list[str] = field(default_factory=list)
     policyVersion: Optional[str] = None
     integrityMetadata: Optional[dict] = None
+
+
+@dataclass
+class ToolCall(_Contract):
+    """INTERFACES.md s14 - a provider-independent tool invocation proposal."""
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass
+class ModelRequest(_Contract):
+    """INTERFACES.md s14 - provider-independent model request."""
+    role: ModelRole
+    messages: list = field(default_factory=list)
+    tools: list = field(default_factory=list)
+    constraints: Optional[dict] = None
+    context: Optional[dict] = None
+    outputSchema: Optional[dict] = None
+
+
+@dataclass
+class ModelResponse(_Contract):
+    """INTERFACES.md s14 - provider-independent model response."""
+    content: str = ""
+    toolCalls: list = field(default_factory=list)
+    structuredOutput: Optional[dict] = None
+    usage: Optional[dict] = None
+    finishReason: str = ""
+
+
+@dataclass
+class RuntimeSession(_Contract):
+    """INTERFACES.md s16 - one runtime session over a task context."""
+    sessionId: str
+    taskContext: dict
+    state: str = "CREATED"
+
+
+@dataclass
+class RuntimeEvent(_Contract):
+    """INTERFACES.md s16 - normalized runtime event (tool call, observation,
+    interruption, ...)."""
+    type: str
+    payload: dict
+    timestamp: str = ""

@@ -611,7 +611,7 @@ Exit Criteria
 
 Status
 
-NEXT
+PARTIAL — Core-side complete (RuntimePort contract, fake adapter tests, unchanged security semantics through the port). Concrete PiRuntimeAdapter requires the actual pi-ultracode runtime and its API.
 
 ---
 
@@ -645,7 +645,7 @@ At least one real model can operate the system through the model abstraction.
 
 Status
 
-PLANNED
+PARTIAL — Core-side complete (ModelPort/ModelRouter contracts, ModelPortDriver with MODEL_CALL journaling, model-call limit enforcement, scripted-port integration + adversarial tests). Provider adapters (DeepSeek/Claude/Gemini) require provider access and API keys.
 
 ---
 
@@ -676,7 +676,7 @@ The complete agent can execute inside Termux using the existing Core.
 
 Status
 
-PLANNED
+NEXT
 
 ---
 

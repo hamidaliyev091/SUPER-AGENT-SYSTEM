@@ -18,9 +18,9 @@ from core import Task, parse_iso
 from continuity.journal import Journal
 
 # resource-limit dimensions without durable v1 records: a set limit cannot
-# be proven respected, so compliance is INCONCLUSIVE (s15/s16)
-_UNRECORDED_DIMENSIONS = ("modelCalls", "retryCount", "delegationCount",
-                          "network", "storage")
+# be proven respected, so compliance is INCONCLUSIVE (s15/s16). modelCalls
+# is recorded from Phase 11 (MODEL_CALL journal events).
+_UNRECORDED_DIMENSIONS = ("retryCount", "delegationCount", "network", "storage")
 
 
 @dataclass
@@ -91,6 +91,13 @@ def resource_compliance(task: Task, journal: Journal) -> ComplianceResult:
         if used > limits.actionSteps:
             problems.append(("RESOURCE_LIMIT_EXCEEDED",
                              f"{used} action steps exceed limit {limits.actionSteps}"))
+    model_calls = sum(1 for r in records if r["eventType"] == "MODEL_CALL")
+    checks["modelCallsUsed"] = model_calls
+    if limits.modelCalls is not None:
+        checks["modelCallsLimit"] = limits.modelCalls
+        if model_calls > limits.modelCalls:
+            problems.append(("RESOURCE_LIMIT_EXCEEDED",
+                             f"{model_calls} model calls exceed limit {limits.modelCalls}"))
     if limits.wallClockTime is not None:
         last_ts = records[-1]["timestamp"] if records else task.createdAt
         started = parse_iso(task.createdAt)
