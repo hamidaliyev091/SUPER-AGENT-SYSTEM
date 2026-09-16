@@ -21,9 +21,17 @@ class ContinuityTestBase(VerificationTestBase):
         self.recovery = RecoveryManager(self.mgr, self.store)
 
     def interrupt(self, task, operation_id, target="/data/out/x.txt"):
-        """Simulate a crash between ACTION_STARTED and ACTION_TERMINAL:
-        the STARTED record exists but no terminal record follows."""
+        """Simulate a crash between ACTION_STARTED and ACTION_TERMINAL.
+        The policy audit precedes STARTED in the real pipeline."""
         journal = self.store.journal_for(task.id)
+        journal.append("POLICY_DECISION", {
+            "taskId": task.id,
+            "operationId": operation_id,
+            "target": target,
+            "argumentsSha256": "x",
+            "decision": "ALLOW",
+            "reason": "pre-crash audit",
+        })
         journal.append("ACTION_STARTED", {
             "actionId": f"interrupted-{operation_id}",
             "taskId": task.id,

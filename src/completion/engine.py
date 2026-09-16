@@ -234,18 +234,20 @@ class CompletionEngine:
 
     @staticmethod
     def _stale(criterion_id: str, journal) -> bool:
-        """s20: any ACTION_STARTED recorded after a criterion's last
-        VERIFICATION_RESULT invalidates it for completion purposes."""
+        """s20: any ACTION_STARTED recorded after the criterion's LATEST
+        VERIFICATION_RESULT invalidates it for completion purposes. A
+        later re-verification supersedes earlier actions."""
         last_result_seq = None
+        action_sequences = []
         for record in journal.records():
             event = record["eventType"]
             if event == "VERIFICATION_RESULT" and \
                     record["payload"].get("criterionId") == criterion_id:
                 last_result_seq = record["sequence"]
-            elif event == "ACTION_STARTED" and last_result_seq is not None \
-                    and record["sequence"] > last_result_seq:
-                return True
-        return False
+            elif event == "ACTION_STARTED":
+                action_sequences.append(record["sequence"])
+        return last_result_seq is not None and any(
+            seq > last_result_seq for seq in action_sequences)
 
     @staticmethod
     def _evidence_provenance(criterion_results, journal) -> Optional[str]:

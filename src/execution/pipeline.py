@@ -105,6 +105,17 @@ class ExecutionPipeline:
 
     def execute(self, request: ActionRequest) -> ExecutionResult:
         action_id = uuid.uuid4().hex
+        if not isinstance(request, ActionRequest):
+            decision = PolicyDecision(
+                decision=PolicyDecisionValue.DENY,
+                reason="malformed ActionRequest",
+                policyVersion=self.policy_engine.policy_version,
+                ruleVersion=self.policy_engine.rule_version,
+            )
+            return ExecutionResult(
+                taskId=getattr(request, "taskId", "unknown"), actionId=action_id,
+                actionRequest=request, policyDecision=decision,
+                errors=["malformed ActionRequest"])
         try:
             return self._execute(request, action_id)
         except JournalError as exc:

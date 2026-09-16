@@ -161,12 +161,24 @@ class VerificationTestBase(unittest.TestCase):
         )
         defaults.update(overrides)
         task = self.mgr.create_task(CreateTaskRequest(**defaults))
-        for state in (TaskState.VALIDATING, TaskState.PLANNING, TaskState.READY,
-                      TaskState.RUNNING, TaskState.OBSERVING, TaskState.VERIFYING):
-            task = self.mgr.transition(task.id, state)
-            if state is stop_at:
-                break
+        if stop_at is not TaskState.CREATED:
+            for state in (TaskState.VALIDATING, TaskState.PLANNING, TaskState.READY,
+                          TaskState.RUNNING, TaskState.OBSERVING, TaskState.VERIFYING):
+                task = self.mgr.transition(task.id, state)
+                if state is stop_at:
+                    break
         return task
+
+    def make_request(self, task, tool_id="fs.write_file", path="/data/out/x.txt"):
+        return ActionRequest(
+            taskId=task.id,
+            actor=ActorIdentity(actorId="agent-1", actorType=ActorType.TOP_LEVEL_AGENT,
+                                taskId=task.id),
+            toolId=tool_id,
+            target=Target(type=TargetType.FILESYSTEM, value=path),
+            arguments={"path": path},
+            reason="test action",
+        )
 
     def acting_write(self, task, content):
         return self.pipeline.execute(ActionRequest(
