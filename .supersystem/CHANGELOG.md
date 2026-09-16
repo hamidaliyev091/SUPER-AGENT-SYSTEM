@@ -163,3 +163,15 @@ All notable project changes. Dates are UTC.
 
 ### Notes
 - ADR-013 records the two-phase verification fix.
+
+## 2026-09-17 — Phase 14 Android Capability Layer (v1 subset)
+
+### Added
+- `src/platforms/termux/android.py` — TermuxAndroidAdapter: package.list (pm list packages), package.inspect (pm path), settings.read (settings get system|secure|global) as registry-complete tools. Commands run as argument lists (no shell, no injection surface); device permission denials surface as clean ANDROID_OPERATION_FAILED ToolResults, never crashes.
+- `tests/integration/test_android_capabilities.py` — 5 tests: scope denials for out-of-TAC packages and settings, LIVE package.list on-device through the pipeline (com.termux found), LIVE settings.read (device-agnostic: value or clean failure - this device denies the shell global-settings permission), invalid namespace rejected by the tool.
+
+### Changed
+- ROADMAP.md: Phase 14 PARTIAL (v1 subset; launch/force-stop/settings-write/accessibility require governance matrix rows and an accessibility service); Phase 16 (Long-Running Autonomous Operation) -> NEXT.
+
+### Notes
+- The canonical setting form is the lowercased full target value (e.g. global.device_name), matched against allowedAndroidSettings; the policy matches the TARGET, not the argument.

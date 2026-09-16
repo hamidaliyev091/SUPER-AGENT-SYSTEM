@@ -767,7 +767,7 @@ Each Android capability has:
 
 Status
 
-NEXT
+PARTIAL — v1 subset complete: package.list/package.inspect/settings.read adapters (pm/settings binaries, argument-list execution, no shell), live on-device pipeline tests, scope denials. Launch/force-stop/settings-write/accessibility need governance matrix rows and an accessibility service.
 
 ---
 
@@ -859,7 +859,7 @@ A long-running task can survive interruption and continue safely from durable st
 
 Status
 
-PLANNED
+NEXT
 
 ---
 
