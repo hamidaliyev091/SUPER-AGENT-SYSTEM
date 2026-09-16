@@ -201,11 +201,22 @@ class ExecutionPipeline:
         result.toolResult = tool_result
         self._release_resources(request)
 
-        # Terminal journal state.
+        # Terminal journal state. Computed directly from the execution
+        # outcome: terminal_journal_state reports UNKNOWN while the terminal
+        # record is not yet durable, so the journal payload cannot reuse it.
+        if result.executed and result.toolResult is not None:
+            if result.toolResult.success:
+                terminal_state = "SUCCEEDED"
+            elif result.toolResult.sideEffectState is SideEffectState.UNKNOWN:
+                terminal_state = "UNKNOWN"
+            else:
+                terminal_state = "FAILED"
+        else:
+            terminal_state = "CANCELLED"
         try:
             journal.append("ACTION_TERMINAL", {
                 "actionId": action_id,
-                "terminalState": result.terminal_journal_state,
+                "terminalState": terminal_state,
                 "sideEffectState": tool_result.sideEffectState.value,
                 "toolSuccess": tool_result.success,
             })

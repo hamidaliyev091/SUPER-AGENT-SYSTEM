@@ -460,7 +460,7 @@ The system can safely recover after:
 
 Status
 
-NEXT
+COMPLETE
 
 ---
 
@@ -519,7 +519,7 @@ Core security and architectural invariants pass automatically.
 
 Status
 
-PLANNED
+NEXT
 
 ---
 

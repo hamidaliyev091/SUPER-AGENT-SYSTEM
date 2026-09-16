@@ -104,3 +104,17 @@ Rejected: importing OpenHands, LangGraph, Letta, or their components as dependen
 5. **Resource compliance is proven only for journaled dimensions.** actionSteps and wallClockTime have authoritative records (ACTION_STARTED counts, journal timestamps); a set limit on modelCalls/retryCount/delegationCount/network/storage has no durable v1 record, so compliance is INCONCLUSIVE for it (s16) — such tasks can never DONE until those records exist (Phase 7 / Phase 18).
 
 **Consequences:** The Fake End-to-End Agent (Phase 9) drives tasks through verify -> evaluate loops purely with returned decisions. Phase 7 must provide durable records for the remaining resource dimensions before tasks with those limits can complete.
+
+## ADR-008 — Continuity and Recovery decisions (2026-09-17)
+
+**Context:** Phase 7 implements CONTINUITY.md s6-s17, s19-s27. The frozen documents fix the protocol stages and recovery outcomes but leave decision logic, retry-safety classification, and transition mechanics open.
+
+**Decisions:**
+
+1. **Retry safety is registry-derived, not heuristic.** An interrupted action may be blindly retried only when its registry classification is READ_ONLY, or MUTATING with IDEMPOTENT + REVERSIBLE (s12/s13). UNKNOWN idempotency (the conservative registry default) makes MUTATING/DESTRUCTIVE interruptions unsafe by construction.
+2. **Probe outcomes map deterministically.** VERIFIED_SUCCESS on all interrupted actions -> RESUME; any VERIFIED_FAILURE -> RETRY; any UNKNOWN with a probe present -> VERIFY_FIRST (task stays in RECOVERING; orchestrator must run verification actions and re-invoke recovery); no probe + unsafe interruptions -> WAITING_USER with durable unknownSideEffects. Blind retry consumes budget; insufficient remaining budget -> BLOCKED (s26).
+3. **RESUME goes through RECOVERING -> READY -> RUNNING.** The execution gate (validate_task: schema, policy versions, TAC activity, limits) only admits READY -> RUNNING, so the resume path structurally revalidates policy/authorization/resource state (s27, s15). Continuity never bypasses Policy.
+4. **Continuity brief is derived-only.** It is rendered from task.json + the verified journal and never stored as a separate authority (s17). prepare_for_compaction persists an enriched checkpoint and returns the brief; failure raises so compaction is deferred (s16.1).
+5. **Phase 4 journal defect fixed:** ACTION_TERMINAL had recorded terminalState UNKNOWN for every executed action. The payload now records the computed outcome; the ExecutionResult.terminal_journal_state property retains its UNKNOWN-until-durable semantics for observers.
+
+**Consequences:** Phase 9's orchestrator loop can drive crash recovery entirely from RecoveryManager outcomes; the external-state probe is the extension point for real runtime inspectors (Phase 10+). Checkpoint enrichment gives Phase 18 observability a ready snapshot format.

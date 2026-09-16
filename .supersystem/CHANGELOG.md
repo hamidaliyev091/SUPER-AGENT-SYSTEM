@@ -102,3 +102,17 @@ All notable project changes. Dates are UTC.
 
 ### Notes
 - ADR-007 records the decision-value mapping and the check precedence order.
+
+## 2026-09-17 — Phase 7 Continuity and Recovery
+
+### Added
+- `src/continuity/continuity_manager.py` — ContinuityManager: journal-derived resource accounting (never resets on continuity restore, s14), computed remaining budget, enriched checkpoints (resourceUsage, remainingBudget, derived progress, continuity summary), and the ContinuityBrief (s17) with a handoff rendering. `prepare_for_compaction` guarantees a durable snapshot + brief before compaction (s16.1) and raises on persistence failure.
+- `src/continuity/recovery.py` — RecoveryManager implementing the s27 safe-resume protocol: load -> integrity -> task state -> authorization (TAC activity) -> journal inspection -> interrupted STARTED-without-terminal identification -> registry-based side-effect classification -> external-state probe -> RESUME / RETRY / VERIFY_FIRST / WAITING_USER / BLOCKED. Blind retry only for READ_ONLY or IDEMPOTENT+REVERSIBLE operations (s12/s13); unknown-effect mutations wait for a human; every decision is journaled (RECOVERY_DECISION) and continuity state updated before transitions; RESUME re-runs the execution gate via RECOVERING -> READY -> RUNNING.
+- `tests/unit/test_recovery.py` — 15 new tests: checkpoint enrichment, brief derivation, compaction preparation, accounting persistence, clean resume, safe retry, never-blind-retry of mutations, probe confirm success/failure/inconclusive, budget exhaustion -> BLOCKED, expired TAC -> BLOCKED, tampered journal/state -> BLOCKED, journaled recovery decisions. Full suite: 250 tests passing on Termux (Python 3.14.6).
+
+### Changed
+- `src/execution/pipeline.py` — FIXED: ACTION_TERMINAL journal payloads recorded terminalState UNKNOWN for every executed action (the property reports UNKNOWN until the record is durable). The payload now computes SUCCEEDED/FAILED/UNKNOWN directly from the execution outcome. Recovery and continuity derivations depend on this.
+- ROADMAP.md: Phase 7 status NEXT → COMPLETE; Phase 8 (Core Test Suite) → NEXT.
+
+### Notes
+- ADR-008 records recovery decision logic, retry-safety classification, and the RECOVERING -> READY -> RUNNING resume path.
