@@ -91,30 +91,29 @@ Rejected: importing OpenHands, LangGraph, Letta, or their components as dependen
 
 **Consequences:** The Completion Engine (Phase 6) can rely on per-criterion results + digests in the verified journal, tamper-evident latest results on disk, task.verification state, and VERIFICATION_INVALIDATED markers — without trusting anything the acting model says. The assessor registry is the extension point for real verifiers in later phases (e.g., a separate-model verifier registers as LEVEL_2 and must produce its own evidence per VERIFICATION.md s10).
 
-## ADR-007 — Completion Engine decisions (2026-09-10)
+## ADR-009 — Core Test Suite architecture and repair re-entry (2026-09-17)
 
-**Context:** Phase 6 implements INTERFACES s20 and VERIFICATION.md s13-s19. The frozen documents fix the DONE conditions but leave the decision-value mapping and the check precedence to implementation.
-
-**Decisions:**
-
-1. **Deterministic check precedence.** evaluate() checks in order: journal integrity -> VERIFYING state -> Completion Contract validity -> policy/rule versions known -> critical failures -> durable verification results -> policy compliance -> resource compliance -> mutation staleness -> evidence provenance -> per-criterion mandatory PASS/evidence/independence. Rationale: record-integrity and compliance problems (s14/s16) are global and unconditionally forbid DONE, so they precede per-criterion freshness; a FAILed criterion still yields REPAIR when records are compliant (fix the failure first).
-2. **Decision mapping.** ALL_CRITERIA_PASSED -> DONE (persisted, integrity-validated, transitioned). MANDATORY_CRITERION_FAILED -> REPAIR. VERIFICATION_INCONCLUSIVE (missing durable results, no evidence, wrong task state) -> CONTINUE. RECOVERY_REQUIRES_REVERIFICATION (any ACTION_STARTED after a criterion's last VERIFICATION_RESULT) -> CONTINUE. INDEPENDENT_EVIDENCE_MISSING -> WAITING_USER. POLICY_RECORD_UNAVAILABLE / POLICY_RECORD_INTEGRITY_FAILED / POLICY_COMPLIANCE_FAILED -> BLOCKED. RESOURCE_LIMIT_EXCEEDED -> FAILED; RESOURCE_RECORD_UNAVAILABLE / RESOURCE_RECORD_INTEGRITY_FAILED -> BLOCKED. CRITICAL_FAILURE_PRESENT -> FAILED. Two extended reason codes beyond the s18 minimum: COMPLETION_CONTRACT_INVALID (-> BLOCKED) and VERIFICATION_RECORD_INTEGRITY_FAILED (-> BLOCKED).
-3. **Only DONE decisions are persisted.** V-PRINCIPLE-05 requires the final decision durably persisted before DONE becomes effective; persisting every CONTINUE evaluation would spam the ledger. Non-DONE decisions are returned in-memory; the orchestrator applies the corresponding transitions (REPAIRING and so on) and the task state itself remains durable. The engine applies ONLY the DONE transition — INTERFACES s20 grants it no authority over other states.
-4. **Critical failure = UNKNOWN side-effect state or category CRITICAL.** v1 has no failure taxonomy beyond FailureRecord; crash-class uncertainty (sideEffectState UNKNOWN) is the conservative critical class (s22).
-5. **Resource compliance is proven only for journaled dimensions.** actionSteps and wallClockTime have authoritative records (ACTION_STARTED counts, journal timestamps); a set limit on modelCalls/retryCount/delegationCount/network/storage has no durable v1 record, so compliance is INCONCLUSIVE for it (s16) — such tasks can never DONE until those records exist (Phase 7 / Phase 18).
-
-**Consequences:** The Fake End-to-End Agent (Phase 9) drives tasks through verify -> evaluate loops purely with returned decisions. Phase 7 must provide durable records for the remaining resource dimensions before tasks with those limits can complete.
-
-## ADR-008 — Continuity and Recovery decisions (2026-09-17)
-
-**Context:** Phase 7 implements CONTINUITY.md s6-s17, s19-s27. The frozen documents fix the protocol stages and recovery outcomes but leave decision logic, retry-safety classification, and transition mechanics open.
+**Context:** Phase 8 requires the ROADMAP test-category tree and the 16 named security tests. Two structural decisions needed recording.
 
 **Decisions:**
 
-1. **Retry safety is registry-derived, not heuristic.** An interrupted action may be blindly retried only when its registry classification is READ_ONLY, or MUTATING with IDEMPOTENT + REVERSIBLE (s12/s13). UNKNOWN idempotency (the conservative registry default) makes MUTATING/DESTRUCTIVE interruptions unsafe by construction.
-2. **Probe outcomes map deterministically.** VERIFIED_SUCCESS on all interrupted actions -> RESUME; any VERIFIED_FAILURE -> RETRY; any UNKNOWN with a probe present -> VERIFY_FIRST (task stays in RECOVERING; orchestrator must run verification actions and re-invoke recovery); no probe + unsafe interruptions -> WAITING_USER with durable unknownSideEffects. Blind retry consumes budget; insufficient remaining budget -> BLOCKED (s26).
-3. **RESUME goes through RECOVERING -> READY -> RUNNING.** The execution gate (validate_task: schema, policy versions, TAC activity, limits) only admits READY -> RUNNING, so the resume path structurally revalidates policy/authorization/resource state (s27, s15). Continuity never bypasses Policy.
-4. **Continuity brief is derived-only.** It is rendered from task.json + the verified journal and never stored as a separate authority (s17). prepare_for_compaction persists an enriched checkpoint and returns the brief; failure raises so compaction is deferred (s16.1).
-5. **Phase 4 journal defect fixed:** ACTION_TERMINAL had recorded terminalState UNKNOWN for every executed action. The payload now records the computed outcome; the ExecutionResult.terminal_journal_state property retains its UNKNOWN-until-durable semantics for observers.
+1. **Single shared harness, canonical module name.** All categories reuse the Phase 5 verification harness through `tests/support/harness.py`, which imports `test_verification_engine` by name via importlib (with tests/unit on sys.path). New suites import only `tests.support.*`; the unit tests keep their dual-name fallback. Every test category runs against the same real wiring (TaskStore, TaskManager, PolicyEngine, ExecutionPipeline, VerificationEngine, CompletionEngine, RecoveryManager) - there are no mock boundaries inside the Core.
+2. **Runner:** `PYTHONPATH=src python3 -m unittest discover -s tests -t .` with `tests/` and every category directory as real packages (Python 3.14 discovery only descends into packages). Category directories without packages are skipped silently - every new category must carry an `__init__.py`.
+3. **Repair-loop re-entry goes through RECOVERING.** TASK_SCHEMA s22 allows REPAIRING -> RUNNING, but the execution gate (s33) only admits RUNNING from READY, and REPAIRING -> READY is not in the lifecycle table. v1 resolution: REPAIRING -> RECOVERING -> READY -> RUNNING - the gate revalidates schema/policy/authorization/limits before every re-entry. No Core change; the orchestrator (Phase 9) follows this path. Flagged for governance reconciliation if the frozen documents are ever revised.
+4. **Crash simulations write a POLICY_DECISION before the interrupted ACTION_STARTED.** The real pipeline journals the decision before STARTED, so a realistic crash state always contains it; completion-time policy compliance correctly treats an ACTION_STARTED without a preceding decision as a violation.
 
-**Consequences:** Phase 9's orchestrator loop can drive crash recovery entirely from RecoveryManager outcomes; the external-state probe is the extension point for real runtime inspectors (Phase 10+). Checkpoint enrichment gives Phase 18 observability a ready snapshot format.
+**Consequences:** Phase 9's orchestrator loop must use the RECOVERING-mediated repair path. Future test categories follow the package rule and the shared harness. The combined runner is the canonical verification command.
+
+## ADR-010 — Orchestrator loop semantics (2026-09-17)
+
+**Context:** Phase 9 builds the loop that drives tasks end to end with fake models. The frozen documents describe the flow diagrammatically; the loop mechanics need recorded decisions.
+
+**Decisions:**
+
+1. **One proposal per RUNNING pass.** The orchestrator feeds exactly one model proposal through the pipeline per RUNNING iteration, then moves to OBSERVING; OBSERVING moves to VERIFYING; VERIFYING runs verify() + evaluate(). Multiple actions happen across CONTINUE cycles (VERIFYING -> RECOVERING -> READY -> RUNNING). Every action is observable and journaled before the next is proposed (TASK_SCHEMA s22 execution path).
+2. **Malformed proposals are dropped, never executed.** Non-ActionRequest proposals are ignored in-place (a buggy model cannot crash or bypass the loop). DENIED proposals still advance to OBSERVING (the denial is the observation).
+3. **WAITING_USER and BLOCKED stop the loop.** The orchestrator cannot authorize resume (TASK_SCHEMA s22); only a USER or SYSTEM_RECOVERY-authorized transition continues, after which run() may be re-invoked. run() is therefore re-entrant across human interventions.
+4. **Model completion claims are never read.** The orchestrator consults only CompletionEngine.evaluate(); the claim API exists on the fakes purely to prove that nothing consumes it (V-PRINCIPLE-02).
+5. **The orchestrator holds no authority of its own**: no direct tool calls, no transitions to DONE, no criteria/limit mutation surfaces. Phase 11 swaps the scripted model double for ModelPort without touching these mechanics.
+
+**Consequences:** Phase 10 (Pi runtime) and Phase 11 (real models) integrate at the model/runtime boundary only; the loop, policy, verification, and completion semantics are proven Core-side.

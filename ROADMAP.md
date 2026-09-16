@@ -519,7 +519,7 @@ Core security and architectural invariants pass automatically.
 
 Status
 
-NEXT
+COMPLETE
 
 ---
 
@@ -571,7 +571,7 @@ A complete task can execute from creation to verified DONE.
 
 Status
 
-PLANNED
+COMPLETE
 
 ---
 
@@ -611,7 +611,7 @@ Exit Criteria
 
 Status
 
-PLANNED
+NEXT
 
 ---
 

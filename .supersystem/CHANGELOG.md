@@ -89,30 +89,31 @@ All notable project changes. Dates are UTC.
 ### Notes
 - ADR-006 records the verification design decisions (assessor registry, always-fresh collection, identity-based independence, journal-first invalidation).
 
-## 2026-09-10 — Phase 6 Completion Engine
+## 2026-09-17 — Phase 8 Core Test Suite
 
 ### Added
-- `src/completion/compliance.py` — completion-time compliance checks over authoritative durable records: every ACTION_STARTED must be audited by a preceding non-DENY POLICY_DECISION (with approval records for ASK); resource consumption derived from verified journal records against the externally enforced limits; unrecorded dimensions with set limits fail closed (s13-s16).
-- `src/completion/store.py` — CompletionDecisionStore: latest decision per task behind the SHA-256 integrity envelope; tampered decisions fail closed on load.
-- `src/completion/engine.py` — CompletionEngine implementing INTERFACES s20: `evaluate(taskId)` checks every applicable DONE condition (s19) in deterministic precedence order (journal integrity -> VERIFYING state -> Completion Contract -> versions known -> critical failures -> durable verification results -> policy compliance -> resource compliance -> mutation staleness -> evidence provenance -> per-criterion PASS/evidence/independence). DONE is journaled (COMPLETION_DECISION), stored behind an integrity envelope, reloaded and integrity-validated, and only then applied via TaskManager.transition(by_completion_engine=True). INCONCLUSIVE structurally cannot produce DONE; only this engine passes the by_completion_engine flag.
-- `tests/unit/test_completion_engine.py` — 17 new tests: DONE authorization, model-cannot-declare-DONE, INCONCLUSIVE-never-DONE, REPAIR on mandatory FAIL, WAITING_USER on missing independent evidence, FAILED on critical failure / resource overrun, BLOCKED on policy violation / tampered journal / tampered results / invalid contract, staleness -> re-verification, decision tampering detection. Full suite: 235 tests passing on Termux (Python 3.14.6).
-
-### Changed
-- ROADMAP.md: Phase 6 status NEXT → COMPLETE; Phase 7 (Continuity and Recovery) → NEXT.
+- `tests/support/` — shared test doubles: FakeModel, MaliciousModel (scope expansion, protected targets, forged completion claims, approval reuse), BuggyModel, UncooperativeModel, FakeTool, FakeVerifier (LEVEL_2 separate-verifier evidence), FakeRuntime; plus the shared harness (canonical single import of the Phase 5 wiring).
+- `tests/security/` — the 16 ROADMAP-required security tests: unauthorized/protected targets, policy bypass, malformed requests, invalid arguments, scope expansion, subagent escalation, false completion claims, verification failure, INCONCLUSIVE, corrupted state, unknown side effects, resource exhaustion, journal failure, expired authorization, expired human approval.
+- `tests/adversarial/` — malicious-model attacks on every authority boundary (scope, protected paths, unknown tools, DONE claims, criteria weakening, limit inflation, fabricated evidence, stored-result forgery, approval reuse).
+- `tests/integration/` — end-to-end flows: complete governed flow under fake runtimes, repair loop, crash-recovery loop, model-driven actions.
+- `tests/recovery/` — crash scenarios: safe retry, unknown-effect wait + human resume, direct resume, context-loss continuity, remaining-budget inheritance.
+- `tests/verification/` — LEVEL_2 separate-verifier flows, approval-gated evidence, verification budget consumption.
+- `tests/replaceability/` — Core has no runtime/model/platform imports (static check); model and runtime swaps yield identical security outcomes; hostile runtime environmentContext grants nothing.
+- Runner now discovers all categories: `PYTHONPATH=src python3 -m unittest discover -s tests -t .`
 
 ### Notes
-- ADR-007 records the decision-value mapping and the check precedence order.
+- ADR-009 records the test-suite architecture and the repair-loop re-entry resolution (REPAIRING -> RECOVERING -> READY -> RUNNING so the execution gate revalidates, resolving the TASK_SCHEMA s22/s33 tension).
 
-## 2026-09-17 — Phase 7 Continuity and Recovery
+### Changed
+- `src/execution/pipeline.py` — malformed (non-ActionRequest) requests now return a structured DENY instead of crashing (ExecutionResult was built before validation).
+- `src/completion/engine.py` — FIXED staleness detection: the check compared actions against the FIRST verification result and returned early; it now compares against the LATEST result so re-verification (e.g. the repair loop) supersedes earlier actions.
+
+## 2026-09-17 — Phase 9 Fake End-to-End Agent
 
 ### Added
-- `src/continuity/continuity_manager.py` — ContinuityManager: journal-derived resource accounting (never resets on continuity restore, s14), computed remaining budget, enriched checkpoints (resourceUsage, remainingBudget, derived progress, continuity summary), and the ContinuityBrief (s17) with a handoff rendering. `prepare_for_compaction` guarantees a durable snapshot + brief before compaction (s16.1) and raises on persistence failure.
-- `src/continuity/recovery.py` — RecoveryManager implementing the s27 safe-resume protocol: load -> integrity -> task state -> authorization (TAC activity) -> journal inspection -> interrupted STARTED-without-terminal identification -> registry-based side-effect classification -> external-state probe -> RESUME / RETRY / VERIFY_FIRST / WAITING_USER / BLOCKED. Blind retry only for READ_ONLY or IDEMPOTENT+REVERSIBLE operations (s12/s13); unknown-effect mutations wait for a human; every decision is journaled (RECOVERY_DECISION) and continuity state updated before transitions; RESUME re-runs the execution gate via RECOVERING -> READY -> RUNNING.
-- `tests/unit/test_recovery.py` — 15 new tests: checkpoint enrichment, brief derivation, compaction preparation, accounting persistence, clean resume, safe retry, never-blind-retry of mutations, probe confirm success/failure/inconclusive, budget exhaustion -> BLOCKED, expired TAC -> BLOCKED, tampered journal/state -> BLOCKED, journaled recovery decisions. Full suite: 250 tests passing on Termux (Python 3.14.6).
-
-### Changed
-- `src/execution/pipeline.py` — FIXED: ACTION_TERMINAL journal payloads recorded terminalState UNKNOWN for every executed action (the property reports UNKNOWN until the record is durable). The payload now computes SUCCEEDED/FAILED/UNKNOWN directly from the execution outcome. Recovery and continuity derivations depend on this.
-- ROADMAP.md: Phase 7 status NEXT → COMPLETE; Phase 8 (Core Test Suite) → NEXT.
+- `src/orchestration/orchestrator.py` — Orchestrator: drives CREATED -> VALIDATING -> PLANNING -> READY -> RUNNING -> (propose -> execute -> observe) -> OBSERVING -> VERIFYING -> (verify -> completion decision) loops. REPAIR and CONTINUE re-enter RUNNING through RECOVERING -> READY (ADR-009 gate revalidation); malformed proposals are ignored; model completion claims are never read; WAITING_USER/BLOCKED stop the loop (human-only resume). The orchestrator decides nothing: proposals go through the ExecutionPipeline; DONE comes only from the CompletionEngine.
+- `tests/integration/test_orchestrator_flows.py` — creation-to-DONE happy path, repair loop (FAIL -> repair -> DONE, two journaled verification results), malformed proposals ignored, uncooperative model never DONE, crash-during-run recovery then completion.
+- `tests/adversarial/test_orchestrator_adversarial.py` — the ROADMAP Phase 9 required demonstration: a malicious FakeModel cannot bypass Policy (scope/protected/unknown-tool/dangerous attempts all DENY, only the legitimate plan step executes), expand scope, declare DONE (claim ignored; DONE journaled only by the engines), or bypass verification (wrong content -> never DONE).
 
 ### Notes
-- ADR-008 records recovery decision logic, retry-safety classification, and the RECOVERING -> READY -> RUNNING resume path.
+- ADR-010 records the orchestrator loop semantics (one action per RUNNING pass, observation stage, CONTINUE re-entry, human states stop the loop, claims never read).
