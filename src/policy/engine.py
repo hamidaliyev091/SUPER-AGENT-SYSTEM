@@ -212,6 +212,12 @@ class PolicyEngine:
                              "HIGH/CRITICAL non-idempotent operation without safe deduplication")
         # 15. operation-specific rule (s31: accessibility tap/type_text/submit)
         if rule.forcedDecision is not None:
+            if rule.forcedDecision is PolicyDecisionValue.ASK:
+                # Every ASK carries its single-use, time-bounded
+                # ApprovalRequest (s21): an ASK without one can never be
+                # approved, so the pipeline would deny it unconditionally.
+                return self._ask(request, rule, target if rule.targetKind else None,
+                                 "operation-specific rule")
             return self._decide(request, rule.forcedDecision, "operation-specific rule")
         # 17. permission matrix (s20); undefined combination -> DENY
         decision = self._matrix(rule, request.permissionMode.value)
@@ -292,6 +298,10 @@ class PolicyEngine:
             ruleVersion=request.ruleVersion,
             approvalReference="appr-" + uuid.uuid4().hex,
             nonce=uuid.uuid4().hex,
+            # The exact arguments the operation would run with. A human
+            # cannot give informed approval to a description alone, and a
+            # grant is bound to what was actually asked about (ADR-021).
+            arguments=dict(request.structuredArguments or {}),
         )
         return PolicyDecision(
             decision=PolicyDecisionValue.ASK,

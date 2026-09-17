@@ -137,6 +137,38 @@ The demo creates a temp workspace, runs a scripted model through the full
 pipeline (policy → real write → observation → verification → completion),
 prints the final state and journal summary, and cleans up.
 
+### Driving the phone (governed, real device)
+
+The agent can observe and control the phone through the GenieX app's
+AccessibilityService, over a closed set of named operations. Nothing runs
+unless Policy authorized it, and the app holds no authority of its own.
+
+```sh
+# once: enable the accessibility service in the app, tap "copy token"
+python3 -m platforms.termux.cli setup-bridge   # clipboard → 0600 file
+python3 -m platforms.termux.cli probe          # what does the device offer?
+
+# declare the goal, the criteria, the scope and the limits - the operator
+# does this, and the model reaches none of it
+PYTHONPATH=src python3 -m platforms.termux.cli run \
+    "open Settings and capture the screen" \
+    --allow-package com.android.settings \
+    --allow-package-op android.launch_package \
+    --criterion ui-foreground-package-is:package=com.android.settings \
+    --criterion screenshot-captured:advisory \
+    --max-iterations 40 --deadline 300
+
+# a task waiting on a human decision, and the resume that carries it on
+python3 -m platforms.termux.cli tasks
+python3 -m platforms.termux.cli approve <reference>
+python3 -m platforms.termux.cli resume <task-id> --by hamid
+```
+
+The run ends in DONE only when the Completion Engine says so; a run stopped
+by a limit ends BLOCKED with a durable reason. See
+`docs/implementation/ANDROID_CAPABILITIES.md` for the operation table, the
+token provisioning, and the verification methods.
+
 ## Testing
 
 ```sh
@@ -150,7 +182,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests/security -t .
 
 Test doubles live in `tests/support/` (FakeModel, MaliciousModel,
 ScriptedModelPort, FakeRuntimeAdapter, FakeVerifier, ...). Security
-invariant IDs T-INV-01..25 are enumerated in
+invariant IDs T-INV-01..38 are enumerated in
 `docs/implementation/TEST_INVARIANTS.md`.
 
 ## Configuration
@@ -193,6 +225,9 @@ adapter ships with SAS yet. Nothing in the repository contains secrets.
 - `ROADMAP.md` — phase status
 - `docs/implementation/TEST_INVARIANTS.md` — security invariant IDs
 - `docs/implementation/PROVIDERS.md` — connecting real model providers
+- `docs/implementation/ANDROID_CAPABILITIES.md` — the phone capability
+  channel: endpoints, token, operation table, verification methods
+- `docs/implementation/GENIEX_BRIDGE.md` — the on-device inference bridge
 
 ## License
 

@@ -767,7 +767,7 @@ Each Android capability has:
 
 Status
 
-PARTIAL — v1 subset complete: package.list/package.inspect/settings.read adapters (pm/settings binaries, argument-list execution, no shell), live on-device pipeline tests, scope denials. Launch/force-stop/settings-write/accessibility need governance matrix rows and an accessibility service.
+COMPLETE (2026-09-18) — the Android capability channel is implemented and governed end to end (ADR-019). Observation and control run through the GenieX app's AccessibilityService over a closed set of named operations (`android.screenshot`, `android.observe_ui`, `android.launch_package`, `android.open_url`, `android.global_action`, `accessibility.tap`, `accessibility.type_text`), each with deterministic authorization, risk/side-effect/reversibility/idempotency classification, resource declaration, audit, and tests. Launch and accessibility are authorized by the existing governance matrix (no matrix change was needed); the capability endpoints are token-gated and loopback-pinned; observations are durable and tamper-evident; the production verification methods and the operator CLI exist; the loop is bounded and an unanswered ASK pauses the task rather than denying it (ADR-020, ADR-021). Deliberately NOT implemented, and out of scope rather than pending: force-stop, settings writes, package install/uninstall, and any privileged path (ADR-019). See docs/implementation/ANDROID_CAPABILITIES.md.
 
 ---
 
@@ -1142,5 +1142,5 @@ The Core provides control.
 Release candidate: 1.0-rc1 (2026-09-17)
 
 - All implementable phases complete; full test suite + CI gate pass on-device.
-- Remaining partial phases (10/11/14) require external systems (pi-ultracode API, provider keys) or governance matrix rows; Phase 15 is deferred by design; Phases 19/20 begin only on demand.
+- Remaining partial phases (10/11) require external systems (pi-ultracode API, cloud provider keys); Phase 15 is deferred by design; Phases 19/20 begin only on demand. Phase 14 is COMPLETE as of 2026-09-18 (Android capability channel, governed loop closure, operator CLI).
 - Final pre-release audit (ADR-016): source-level comparison with OpenHands, LangGraph, Goose, and DeepAgents found no justified code changes.

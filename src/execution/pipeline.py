@@ -165,6 +165,17 @@ class ExecutionPipeline:
             result.errors.append(str(exc))
             return result
 
+        # The registry declares what policy may authorize; the tool table
+        # declares what this runtime can actually do, and the two are not
+        # the same set. An operation with no implementation is refused here,
+        # before a human is asked and before anything is marked started:
+        # nothing ran, so nothing about its side effect is unknown.
+        if request.toolId not in self.tools:
+            result.policyDecision = self._denied_copy(
+                decision,
+                f"operation {request.toolId!r} has no implementation in this runtime")
+            return result
+
         if decision.decision is PolicyDecisionValue.ASK:
             if not self._approval_flow(request, decision, journal, result):
                 return result

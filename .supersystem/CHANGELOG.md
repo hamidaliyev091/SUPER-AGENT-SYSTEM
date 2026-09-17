@@ -150,3 +150,122 @@ All notable project changes. Dates are UTC.
 
 ### Notes
 - ADR-018 records the bridge contract v2, the single-resident memory policy, and the FGS decisions.
+
+## 2026-09-18 — Phase 14: real Android capability channel, governed loop closure, operator CLI
+
+The system can now act on the phone. Every part of this phase was added at an
+existing extension point; no Core contract changed and the authority chain
+(model proposes -> Policy authorizes -> pipeline executes and audits -> code
+assessors verify -> Completion alone grants DONE) is intact.
+
+### Added (SAS side)
+
+- `src/platforms/termux/bridge_http.py` — one loopback-only JSON transport
+  shared by the inference bridge and the capability bridge (connection,
+  timeout, HTTP and protocol failures as stable codes; error bodies are read
+  and closed rather than leaked).
+- `src/platforms/termux/android_bridge.py` — `AndroidCapabilityBridge`:
+  `state()`, `observe()`, `action()`, `execute()` over a CLOSED set of named
+  operations (`android.screenshot`, `android.observe_ui`,
+  `android.launch_package`, `android.open_url`, `android.global_action`,
+  `accessibility.tap`, `accessibility.type_text`). Bearer token on the
+  capability endpoints only; the token is never logged, journaled, or placed
+  in a ToolResult. `AndroidBridgeError` carries the server's structured code
+  verbatim.
+- `src/platforms/termux/android_capabilities.py` — `TermuxAndroidCapabilityAdapter`:
+  one `Tool` per operation, strict argument validation, structured
+  `ToolResult`, error codes mapped onto `KNOWN_FAILED` versus `UNKNOWN`
+  (`_NO_EFFECT_CODES` means the device refused before anything happened;
+  anything else on an action is a possibly-applied side effect), bounded
+  retry only for read-only observations, and a declared
+  `ANDROID_FOREGROUND` resource on every operation. Screenshots land in the
+  observation store as content-addressed artifacts; the `ToolResult` carries
+  only path, digest, size and dimensions.
+- `src/continuity/observation_store.py` — `ObservationStore`: enveloped,
+  durable observation records; content-addressed immutable artifacts;
+  bounded `recent()` reads; `sweep()` retention for records and
+  unreferenced artifacts; `render_observation()` for bounded replay into a
+  model request. Tampering raises `TaskIntegrityError`.
+- `src/verification/android_methods.py` — `default_methods()`: the production
+  verification methods, as code assessors (never models):
+  `file-content-equals`, `ui-foreground-package-is`, `ui-node-text-present`,
+  `foreground-package-changed`, `screenshot-captured`. Expected values are
+  read from the criterion's `evidenceRequirements` in a documented
+  `key=value` form.
+- `src/execution/pending_approval.py` — `PendingApprovalStore` +
+  `DurableApprover`: a durable, scoped, time-bounded, single-use grant;
+  fail-closed in every ambiguous case; best-effort Termux notification that
+  is never authority.
+- `src/platforms/termux/cli.py` — the operator CLI
+  (`python3 -m platforms.termux.cli`): `run`, `status`, `tasks`, `approve`,
+  `deny`, `resume`, `probe`, `setup-bridge`. The operator declares the
+  success criteria, the scope, and the limits; the model reaches none of it.
+
+### Changed (SAS side)
+
+- `src/policy/registry.py` — Android capability rows using only existing
+  permission-matrix combinations (ADR-019). `android.open_url` is
+  EXTERNAL_EFFECT with `forcedDecision=ASK`, so an external effect is a human
+  decision in every permission mode; scope is checked before the ASK, so an
+  out-of-scope host is DENY rather than a prompt.
+- `src/execution/pipeline.py` — an operation that is registered but has no
+  implementation in this runtime is refused before a human is asked and
+  before anything is marked started: nothing ran, so nothing about its side
+  effect is unknown.
+- `src/orchestration/orchestrator.py` — loop safety (ADR-020): deadline,
+  stall detection on proposal signatures, repeated-failure cap, model-token
+  budget from durable usage, every limit ending in BLOCKED with a durable
+  `loop_stopped` reason; an action whose terminal state is not durable is
+  handed to `RecoveryManager` instead of being retried; an unanswered ASK
+  pauses the task in WAITING_USER (ADR-021).
+- `src/models/model_port.py` — the loop closes: `observe()` records the
+  result as an observation and asks the vision capability to describe an
+  image artifact; `build_request()` replays the last K observations, marking
+  superseded ones; model calls respect a token budget.
+
+### Added (Android side — committed in the geniex_chat_android project)
+
+- `capability/SasAccessibilityService.kt` — bounded UI observation, screenshot
+  capture, global actions, gesture dispatch, and text entry on the focused
+  editable node.
+- `capability/CapabilityHandler.kt` — executes the closed operation set and
+  returns structured JSON; unknown operations are refused.
+- `capability/CapabilityProtocol.kt` + JVM unit tests — request/response
+  parsing and structured errors, mirroring the bridge protocol.
+- `capability/BridgeToken.kt` — generates the bearer token once and copies it
+  to the clipboard so the operator can provision it without typing it.
+- `GenieXBridgeServer.kt` — `GET /v1/android/state` and
+  `POST /v1/android/execute` on the existing loopback server, bearer-gated,
+  with the same structured-error shape as the inference endpoints.
+- `AndroidManifest.xml` — the accessibility service declared
+  `exported="false"` with `BIND_ACCESSIBILITY_SERVICE`; `QUERY_ALL_PACKAGES`
+  so launch intents for other packages resolve.
+
+### Tests
+
+- New: `tests/support/capability_server.py` (a test-only reference device
+  server, never on the production path), `tests/support/capability_harness.py`
+  (the shared governed-loop fixture), and suites for the capability loop,
+  the observation loop, loop safety, durable approval, the production
+  verification methods, capability tool parity, the observation store, the
+  operator CLI, capability security, and transport replaceability.
+- Security coverage: an injected observation cannot authorize an action; the
+  model cannot widen its own authorization; an external effect is a human
+  decision even in scope; the device is not asked when Policy says ASK; the
+  CLI offers no shell-shaped tool; a tool is executed in exactly one place;
+  the device channel never shells out; the token is never printed and never a
+  source literal; the device refuses an operation outside the closed set.
+- `tests/integration/test_termux_platform.py`: scope patterns are now derived
+  through the same canonicalizer Policy uses. The previous raw form could
+  never match on Windows (a `C:\...` path canonicalizes to `/C:/...`), a
+  pre-existing Windows-only test defect that passed on POSIX.
+- Full suite: 348 -> 495 tests, all green (5 skipped without device binaries).
+
+### Notes
+
+- ADR-019 (capability channel, observation store, loop closure), ADR-020
+  (loop safety, including three recorded deviations from the written plan),
+  and ADR-021 (durable human approval) record the decisions.
+- Out of scope and unchanged: cloud model providers, any privileged path
+  (root/adb/shizuku), package install/uninstall, settings writes, arbitrary
+  shell, long-term memory, and any new lifecycle state or Core contract.

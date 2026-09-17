@@ -277,6 +277,39 @@ OPERATIONS.update({
     "root.structured_operation": OperationRule(
         "root.structured_operation", RiskLevel.CRITICAL, SideEffect.MUTATING,
         Reversibility.UNKNOWN, Idempotency.UNKNOWN, outOfScope=True),
+    # -- Android capability registry (Phase 14; ADR-019) -------------------
+    # Real device observation and control through the Android bridge app's
+    # named capability operations. Every operation here reuses an existing
+    # permission-matrix row: no new classification combination is invented
+    # (ADR-004). The app exposes no shell operation, so no rule for one can
+    # exist here either.
+    "android.screenshot": OperationRule(
+        "android.screenshot", RiskLevel.LOW, SideEffect.READ_ONLY,
+        Reversibility.REVERSIBLE, Idempotency.IDEMPOTENT),
+    "android.observe_ui": OperationRule(
+        "android.observe_ui", RiskLevel.LOW, SideEffect.READ_ONLY,
+        Reversibility.REVERSIBLE, Idempotency.IDEMPOTENT),
+    "android.launch_package": OperationRule(
+        "android.launch_package", RiskLevel.MEDIUM, SideEffect.MUTATING,
+        Reversibility.REVERSIBLE, Idempotency.CONDITIONALLY_IDEMPOTENT,
+        TargetType.PACKAGE, ("allowedPackages",), ("package",),
+        packageOperationGate=True),
+    "android.open_url": OperationRule(
+        # Opening a URL hands control to another app, so it is an external
+        # effect with no deduplication guarantee, and the registry asks for
+        # human approval in every permission mode (the s31 precedent for
+        # external UI effects). Scope is checked BEFORE the ASK, so an
+        # out-of-scope host is DENY, never a prompt.
+        "android.open_url", RiskLevel.MEDIUM, SideEffect.EXTERNAL_EFFECT,
+        Reversibility.UNKNOWN, Idempotency.UNKNOWN,
+        TargetType.NETWORK_DOMAIN,
+        ("allowedNetworkDomains", "allowedNetworkDestinations"), ("url",),
+        forcedDecision=PolicyDecisionValue.ASK),
+    "android.global_action": OperationRule(
+        # BACK/HOME are reversible navigation on the foreground app.
+        "android.global_action", RiskLevel.MEDIUM, SideEffect.MUTATING,
+        Reversibility.REVERSIBLE, Idempotency.CONDITIONALLY_IDEMPOTENT,
+        requiredArgs=("action",)),
 })
 
 # PROTECTED_PATHS.md s4-s12: semantic protection classes. Name patterns are

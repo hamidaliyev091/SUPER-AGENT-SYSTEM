@@ -35,6 +35,20 @@ from platforms.termux import (
 )
 
 
+def scope_pattern(path: str) -> str:
+    """A scope pattern for a path, in the form Policy canonicalizes to.
+
+    `<tmp>/**` is not the same string as the canonical `/C:/.../**` a
+    Windows path becomes (and `/tmp/**` on POSIX it already is), so the
+    pattern is derived through the same canonicalizer Policy uses and the
+    test declares what it means on both.
+    """
+    canonical = Canonicalizer(resolve_symlinks=False).canonicalize(
+        TargetType.FILESYSTEM, path)
+    assert canonical is not None, path
+    return canonical.rstrip("/") + "/**"
+
+
 class TermuxPlatformTests(VerificationTestBase):
 
     def make_platform_task(self, read_scope, write_scope, protected):
@@ -84,8 +98,9 @@ class TermuxPlatformTests(VerificationTestBase):
     def test_real_filesystem_tools_execute_through_policy(self):
         with tempfile.TemporaryDirectory() as tmp:
             task, pipeline = self.make_platform_task(
-                read_scope=f"{tmp}/**", write_scope=f"{tmp}/out/**",
-                protected={"P0": (f"{tmp}/.supersystem/**",)})
+                read_scope=scope_pattern(tmp),
+                write_scope=scope_pattern(f"{tmp}/out"),
+                protected={"P0": (scope_pattern(f"{tmp}/.supersystem"),)})
             for state in (TaskState.VALIDATING, TaskState.PLANNING,
                           TaskState.READY, TaskState.RUNNING):
                 task = self.mgr.transition(task.id, state)
@@ -109,8 +124,8 @@ class TermuxPlatformTests(VerificationTestBase):
     def test_filesystem_mutation_respects_protected_mapping(self):
         with tempfile.TemporaryDirectory() as tmp:
             task, pipeline = self.make_platform_task(
-                read_scope=f"{tmp}/**", write_scope=f"{tmp}/**",
-                protected={"P0": (f"{tmp}/.supersystem/**",)})
+                read_scope=scope_pattern(tmp), write_scope=scope_pattern(tmp),
+                protected={"P0": (scope_pattern(f"{tmp}/.supersystem"),)})
             for state in (TaskState.VALIDATING, TaskState.PLANNING,
                           TaskState.READY, TaskState.RUNNING):
                 task = self.mgr.transition(task.id, state)
@@ -121,13 +136,14 @@ class TermuxPlatformTests(VerificationTestBase):
                               value=f"{tmp}/.supersystem/POLICY.md")))
             self.assertFalse(protected_write.executed)
             self.assertEqual(protected_write.policyDecision.decision.value, "DENY")
+            self.assertEqual(protected_write.policyDecision.reason, "protected target")
             self.assertFalse(Path(f"{tmp}/.supersystem/POLICY.md").exists())
 
     def test_filesystem_errors_report_known_failed(self):
         with tempfile.TemporaryDirectory() as tmp:
             task, pipeline = self.make_platform_task(
-                read_scope=f"{tmp}/**", write_scope=f"{tmp}/**",
-                protected={"P0": (f"{tmp}/.supersystem/**",)})
+                read_scope=scope_pattern(tmp), write_scope=scope_pattern(tmp),
+                protected={"P0": (scope_pattern(f"{tmp}/.supersystem"),)})
             for state in (TaskState.VALIDATING, TaskState.PLANNING,
                           TaskState.READY, TaskState.RUNNING):
                 task = self.mgr.transition(task.id, state)

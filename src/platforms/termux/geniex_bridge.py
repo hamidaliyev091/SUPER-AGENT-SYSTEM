@@ -16,32 +16,26 @@ parts - no custom protocol. Security rules enforced here:
 from __future__ import annotations
 
 import base64
-import json
 import os
-import socket
-import urllib.error
-import urllib.parse
-import urllib.request
 from typing import List, Optional
 
-DEFAULT_BRIDGE_URL = "http://127.0.0.1:8765"
+from .bridge_http import (
+    DEFAULT_BRIDGE_URL,
+    BridgeError,
+    loopback_host as _loopback_host_shared,
+    request_json,
+)
 
 
-class GenieXBridgeError(Exception):
+class GenieXBridgeError(BridgeError):
     """Bridge failure with a stable, machine-readable code."""
-
-    def __init__(self, code: str, message: str):
-        super().__init__(f"{code}: {message}")
-        self.code = code
 
 
 def _loopback_host(url: str) -> str:
-    parsed = urllib.parse.urlparse(url)
-    host = parsed.hostname or ""
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        raise GenieXBridgeError(
-            "LOOPBACK", f"bridge URL must be loopback-only, got {host!r}")
-    return host
+    try:
+        return _loopback_host_shared(url)
+    except BridgeError as exc:
+        raise GenieXBridgeError(exc.code, exc.message)
 
 
 def text_message(role: str, content: str) -> dict:
@@ -106,38 +100,8 @@ class GenieXBridge:
     # -- transport ------------------------------------------------------------------
 
     def _request(self, method: str, path: str, body: Optional[dict] = None) -> dict:
-        url = self.base_url + path
-        data = None
-        headers = {"Accept": "application/json"}
-        if body is not None:
-            data = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(url, data=data, headers=headers,
-                                         method=method)
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = response.read().decode("utf-8", errors="replace")
-        except socket.timeout:
-            raise GenieXBridgeError(
-                "TIMEOUT", f"bridge did not respond within {self.timeout}s")
-        except urllib.error.HTTPError as exc:
-            detail = ""
-            try:
-                detail = json.loads(exc.read().decode("utf-8", errors="replace")).get(
-                    "error", {}).get("message", "")
-            except Exception:
-                pass
-            raise GenieXBridgeError(
-                "HTTP", f"{path} returned {exc.code}" + (f": {detail}" if detail else ""))
-        except (urllib.error.URLError, ConnectionError, OSError) as exc:
-            raise GenieXBridgeError(
-                "CONNECTION", f"bridge unreachable at {self.base_url}: {exc}")
-        try:
-            decoded = json.loads(payload)
-        except json.JSONDecodeError:
-            raise GenieXBridgeError("PROTOCOL", f"bridge returned non-JSON: {payload[:120]}")
-        if not isinstance(decoded, dict):
-            raise GenieXBridgeError("PROTOCOL", "bridge response is not an object")
+        decoded = request_json(self.base_url, path, method=method, body=body,
+                               timeout=self.timeout, error=GenieXBridgeError)
         if "error" in decoded and isinstance(decoded.get("error"), dict):
             raise GenieXBridgeError(
                 "HTTP", decoded["error"].get("message", "bridge error"))

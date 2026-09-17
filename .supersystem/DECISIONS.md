@@ -142,3 +142,147 @@ Rejected: importing OpenHands, LangGraph, Letta, or their components as dependen
 4. **Tool calls via a text convention.** The GenieX SDK exposes no structured tool-call API, so the SAS side parses JSON tool-call lines from model text into proposals. The bridge never parses or executes tool calls - proposals only, Policy decides.
 
 **Consequences:** The full path (SAS client -> real bridge -> real NPU models) is proven on-device. Provider replaceability is unchanged; cloud adapters later implement the same ModelPort surface.
+
+## ADR-019 — Android capability channel (2026-09-18)
+
+**Context:** Phase 14 gives the agent a real device to act on. Probing the
+device settled what is possible: from the Termux UID, `screencap` fails,
+`dumpsys` is permission-denied, and `input` needs INJECT_EVENTS. Termux
+cannot observe or drive this phone. The app that already hosts the GenieX
+inference bridge can, through an AccessibilityService.
+
+**Decisions:**
+
+1. **The device channel is a closed set of named operations.** The app
+   exposes `android.screenshot`, `android.observe_ui`, `android.launch_package`,
+   `android.open_url`, `android.global_action`, `accessibility.tap`,
+   `accessibility.type_text` over two endpoints (`GET /v1/android/state`,
+   `POST /v1/android/execute`) on the existing 127.0.0.1:8765 server. The
+   operation name is the only thing that selects behaviour; there is no
+   shell operation, no arbitrary intent, no arbitrary component, and no way
+   to name one. This satisfies the standing constraint that arbitrary shell
+   execution must not be exposed as a general-purpose agent tool.
+2. **Capability endpoints are token-gated; inference endpoints are not.**
+   Loopback pinning keeps other hosts out but not other local apps, so the
+   two capability endpoints require `Authorization: Bearer <token>`; the
+   verified inference endpoints stay open so their device-verified path is
+   unchanged. The token is generated on first use (32 random bytes, hex) and
+   provisioned by copying it to the clipboard in the app and reading it with
+   `termux-clipboard-get` in `setup-bridge`, which writes it to a 0600 file
+   and prints only its length and a four-character prefix. It is never
+   logged, journaled, or placed in a ToolResult. The app's capability switch
+   gates the endpoints independently of inference.
+3. **The app is a dumb executor; Policy stays the only authorizer.** The app
+   validates arguments and executes; it makes no authorization decision and
+   holds no policy. Every operation it performs has already been authorized
+   by SAS Policy, and the app cannot be asked to do anything SAS did not
+   name.
+4. **Observations are durable, immutable, and content-addressed.**
+   `ObservationStore` records each result under
+   `<task>/observations/<timestamp>-<id>.json` with the same SHA-256
+   integrity envelope as the task store, and screenshot bytes under
+   `<task>/artifacts/<sha256>.png`. A tampered record raises
+   `TaskIntegrityError` rather than reading back as plausible history. Reads
+   are bounded (`recent`) and retention is bounded (`sweep`), so a task that
+   observes forever cannot fill the device. An observation is data, never
+   authority: it carries no policy decision, satisfies no criterion by
+   itself, and only the execution path may append.
+5. **The loop closes at the existing ModelPort seam.** `ModelPortDriver.observe()`
+   (designed for this, previously a no-op) records the result as an
+   observation and, when the result carries an image artifact, asks the
+   vision capability for a description and records that too.
+   `build_request()` replays the last K observations, marking those older
+   than the most recent action as superseded, so the model can reason about
+   what actually happened instead of only about what it intended. No new
+   memory system and no Core contract change.
+6. **The VLM describes; it never acts.** `describe_image` returns text that
+   is stored as an observation. The vision capability has no path to the
+   pipeline, and no model output is ever an action: it is a proposal that
+   Policy may refuse.
+
+**Consequences:** The authority chain now reaches real hardware:
+model proposes -> Policy authorizes -> adapter executes -> verifier checks ->
+Completion decides. Replaceability is preserved: the transport is one
+implementation of a contract, and `tests/replaceability` shows the governed
+outcome is identical over HTTP and in process. Cloud model providers and any
+privileged path (root/adb/shizuku, package install, settings writes,
+arbitrary shell) remain out of scope.
+
+## ADR-020 — Loop safety limits (2026-09-18)
+
+**Context:** An autonomous loop that cannot be bounded is not deployable, and
+a loop that stops without saying why is worse: the pre-Phase-14 orchestrator
+returned a still-RUNNING task when its iteration guard tripped, which reads
+as "still working" when it is not.
+
+**Decisions:**
+
+1. **Every limit ends in BLOCKED with a durable reason.** `run()` accepts
+   `max_iterations`, `deadline_seconds`, `stall_limit`, and `failure_limit`.
+   Whichever one trips, the loop stops through `_stop()`: a `Decision`
+   (`decision="loop_stopped"`) is appended to the task and the task
+   transitions to BLOCKED. A stop is never reported as DONE, and never as
+   RUNNING.
+2. **A stall is a repeated proposal, not a slow model.** Consecutive RUNNING
+   turns are compared by proposal signature (operation plus canonical
+   arguments). Proposing the same thing again, or proposing nothing while
+   the task is unfinished, counts as a stall; a new proposal resets the
+   count. `DEFAULT_STALL_LIMIT` is 3.
+3. **The model's own budget is checked before it is asked again.** Journaled
+   `MODEL_CALL` usage is read from durable state, so a continuation cannot
+   reset a budget (CONTINUITY s14).
+4. **An action without a durable terminal record is never retried by the
+   loop.** When an action executed but its terminal state did not persist,
+   its side effect is unknown; the loop moves the task to RECOVERING and
+   lets `RecoveryManager` decide. Without a recovery manager it stops rather
+   than continuing.
+5. **Deviations from the written plan, recorded here rather than silently:**
+   (a) there is no per-action timeout worker thread in `ExecutionPipeline` -
+   the client-side HTTP timeout plus the conservative mapping of a transport
+   timeout to an unknown side effect already covers the case, and adding a
+   thread to the frozen pipeline was not justified by a real defect;
+   (b) a loop stop is a durable `Decision` on the task, not a new journal
+   event type, so no frozen journal contract changed;
+   (c) `RecoveryManager` is invoked only on the undurable-terminal path,
+   which is the one place where the loop genuinely cannot proceed alone.
+
+**Consequences:** A run always ends in a state that says what happened.
+Budgets, deadlines and stalls are enforceable without changing any Core
+contract.
+
+## ADR-021 — Durable human approval (2026-09-18)
+
+**Context:** Approval was synchronous and in-memory: an unanswered ASK
+became a DENY, so a task that needed a human could not pause and be resumed.
+On a phone, the human is often not holding the phone when the question is
+asked.
+
+**Decisions:**
+
+1. **A question and a permission are different things.** When Policy answers
+   ASK and no grant exists, `DurableApprover` persists an
+   `ApprovalRequest`-shaped record under `<task>/approvals/<ref>.json` and
+   returns no approval. The pipeline therefore executes nothing, and the
+   orchestrator pauses the task in WAITING_USER.
+2. **A grant is scoped, time-bounded, and single-use.** A grant binds to
+   `(taskId, operation, canonical target, argumentsSha256)` with an
+   `expiresAt`. `DurableApprover` matches a stored grant and mints an
+   `ApprovalResult` carrying the *current* request reference, so
+   `PolicyEngine.validate_approval`'s existing single-use, expiry and
+   reference checks run unchanged and no second authorization system exists.
+3. **The CLI is authoritative.** `approve` and `deny` write the durable
+   decision; `resume` is the authorized transition that carries the task out
+   of WAITING_USER (TASK_SCHEMA s22). A Termux notification is best-effort
+   visibility only - a notifier that fails cannot block the pause, and it
+   never grants anything.
+4. **Failing closed is the default in every ambiguous case.** An unreadable
+   approval record stops the run; an expired request cannot be granted; a
+   grant for another target or other arguments does not authorize this
+   request; a consumed grant is not offered again.
+
+**Consequences:** An ASK-gated task can pause, survive a process restart, be
+approved from the CLI, and resume to completion, without weakening any
+existing approval check. Documented behaviour worth knowing: each
+re-proposal of an unanswered question creates one new pending record, so the
+stall detector is what bounds their growth - an operator can always deny the
+stale reference.

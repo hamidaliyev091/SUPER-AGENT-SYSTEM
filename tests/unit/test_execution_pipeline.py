@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from continuity.task_store import TaskStore
 from execution import ExecutionPipeline, QueueApprover
@@ -294,6 +295,87 @@ class ResourceAndFailureTests(PipelineTestBase):
         result = self.pipeline.execute(self.make_request(task))
         self.assertFalse(result.executed)
         self.assertEqual(len(self.writes), 0)
+
+
+class MissingImplementationTests(PipelineTestBase):
+    """The registry declares what Policy may authorize; the tool table
+    declares what this runtime can run, and the two are not the same set
+    (POLICY_RULES registers operations no adapter implements). An operation
+    with no implementation must be refused - not attempted, not reported as
+    an unknown side effect, and not escalated to a human who cannot make it
+    work."""
+
+    def ui_request(self, task, tool_id: str) -> ActionRequest:
+        target = "com.example.app#n0"
+        return ActionRequest(
+            taskId=task.id,
+            actor=ActorIdentity(actorId="agent-1", actorType=ActorType.TOP_LEVEL_AGENT,
+                                taskId=task.id),
+            toolId=tool_id,
+            target=Target(type=TargetType.UI, value=target),
+            arguments={"target": target},
+            reason="test action",
+        )
+
+    def ui_task(self):
+        return self.make_task(targetAuthorizationContext=make_tac(
+            allowedUIActions=["com.example.app#*"]))
+
+    def test_a_registered_operation_without_an_implementation_is_refused(self):
+        # accessibility.inspect_ui is LOW/READ_ONLY: Policy allows it in AUTO,
+        # and no adapter implements it. Nothing ran, so nothing about its side
+        # effect is unknown.
+        task = self.ui_task()
+        result = self.pipeline.execute(self.ui_request(task, "accessibility.inspect_ui"))
+
+        self.assertFalse(result.executed)
+        self.assertIsNone(result.toolResult)
+        self.assertEqual(result.policyDecision.decision.value, "DENY")
+        self.assertIn("no implementation", result.policyDecision.reason)
+        self.assertEqual(result.terminal_journal_state, "CANCELLED")
+
+    def test_a_refused_operation_leaves_no_started_record(self):
+        # The audit says what Policy decided (ALLOW); the absence of an
+        # ACTION_STARTED record is what says it was refused afterwards.
+        task = self.ui_task()
+        self.pipeline.execute(self.ui_request(task, "accessibility.inspect_ui"))
+        records = self.store.journal_for(task.id).records()
+
+        decisions = [r["payload"]["decision"] for r in records
+                     if r["eventType"] == "POLICY_DECISION"]
+        self.assertEqual(decisions, ["ALLOW"])
+        self.assertEqual([r for r in records if r["eventType"] == "ACTION_STARTED"], [])
+
+    def test_an_unimplemented_ask_operation_never_reaches_a_human(self):
+        # accessibility.submit is forced ASK. Asking an operator to approve
+        # something the runtime cannot do would be a dead end: the refusal
+        # happens before the prompt, and no approval request is created.
+        task = self.ui_task()
+        self.pipeline.approver = mock.Mock()
+        result = self.pipeline.execute(self.ui_request(task, "accessibility.submit"))
+
+        self.pipeline.approver.request.assert_not_called()
+        self.assertFalse(result.executed)
+        self.assertIsNone(result.approvalResult)
+        events = [r["eventType"] for r in self.store.journal_for(task.id).records()]
+        self.assertNotIn("APPROVAL_REQUESTED", events)
+
+    def test_a_registered_tool_is_still_executed_normally(self):
+        # the refusal is about the tool table, not about the registry: the
+        # same request shape executes when an implementation exists
+        task = self.ui_task()
+        self.tools["accessibility.inspect_ui"] = Tool(
+            id="accessibility.inspect_ui", name="inspect_ui", description="inspect",
+            inputSchema={}, outputSchema={}, riskLevel=RiskLevel.LOW,
+            sideEffect=SideEffect.READ_ONLY, reversibility=Reversibility.REVERSIBLE,
+            execute=lambda args, context: ToolResult(
+                success=True, sideEffectState=SideEffectState.KNOWN_COMPLETED,
+                timestamp=utcnow_iso()))
+
+        result = self.pipeline.execute(self.ui_request(task, "accessibility.inspect_ui"))
+
+        self.assertTrue(result.executed)
+        self.assertEqual(result.terminal_journal_state, "SUCCEEDED")
 
 
 if __name__ == "__main__":

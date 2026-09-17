@@ -292,6 +292,32 @@ class TargetScopeTests(PolicyEngineTestBase):
             target=Target(type=TargetType.UI, value="other_button"),
             args={}, tac=self.tac))
 
+    def test_forced_ask_carries_an_approval_request(self):
+        # An ASK that carries no ApprovalRequest can never be approved, so
+        # the pipeline would deny it unconditionally (s21).
+        decision = self.evaluate(make_request(
+            "accessibility.tap",
+            target=Target(type=TargetType.UI, value="ok_button"),
+            args={"target": "ok_button"}, tac=self.tac))
+
+        self.assertIs(decision.decision, PolicyDecisionValue.ASK)
+        approval = decision.approvalRequirement
+        self.assertIsNotNone(approval)
+        self.assertEqual(approval.operation, "accessibility.tap")
+        self.assertEqual(approval.target.value, "ok_button")
+        self.assertEqual(approval.arguments, {"target": "ok_button"})
+        self.assertTrue(approval.approvalReference)
+        self.assertTrue(approval.nonce)
+        self.assertTrue(approval.expiresAt)
+
+    def test_forced_ask_still_denies_an_out_of_scope_target(self):
+        # the scope check runs before the operation-specific rule, so an
+        # unauthorized node is never turned into a prompt
+        self.assert_denied(make_request(
+            "accessibility.tap",
+            target=Target(type=TargetType.UI, value="evil_button"),
+            args={"target": "evil_button"}, tac=self.tac))
+
     def test_settings_scope_enforced(self):
         self.assert_denied(make_request(
             "settings.read",
