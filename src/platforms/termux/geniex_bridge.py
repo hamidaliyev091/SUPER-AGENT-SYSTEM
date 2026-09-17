@@ -1,15 +1,17 @@
-"""GenieXBridge (SAS side of the GenieX bridge contract, v1).
+"""GenieXBridge (SAS side of the GenieX bridge contract, v2).
 
-A stdlib-only HTTP client for the local GenieX inference layer
-(docs/implementation/GENIEX_BRIDGE.md). Security rules enforced here:
+A stdlib-only HTTP client for the Android GenieX loopback server
+(docs/implementation/GENIEX_BRIDGE.md). The interface is the standard
+OpenAI-compatible chat completions contract with multimodal image content
+parts - no custom protocol. Security rules enforced here:
 
 - loopback only: a non-loopback bridge URL is refused (the bridge is a
   local IPC channel, never a remote host);
 - the bridge is inference only: whatever it returns is model output and
   flows through the normal ModelPort -> proposal -> Policy path;
 - failures raise GenieXBridgeError with a stable code (CONNECTION, TIMEOUT,
-  HTTP, PROTOCOL, LOOPBACK) so callers can fail safely without crashing the
-  governed loop.
+  HTTP, PROTOCOL, CONFIG, LOOPBACK) so callers can fail safely without
+  crashing the governed loop.
 """
 from __future__ import annotations
 
@@ -42,8 +44,22 @@ def _loopback_host(url: str) -> str:
     return host
 
 
+def text_message(role: str, content: str) -> dict:
+    return {"role": role, "content": content}
+
+
+def image_message(prompt: str, image_bytes: bytes,
+                  mime_type: str = "image/png") -> dict:
+    """OpenAI-compatible multimodal user message with an image part."""
+    data_url = f"data:{mime_type};base64," + base64.b64encode(image_bytes).decode("ascii")
+    return {"role": "user", "content": [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": data_url}},
+    ]}
+
+
 class GenieXBridge:
-    """Client for the GenieX local inference bridge (contract v1)."""
+    """Client for the GenieX local inference bridge (contract v2)."""
 
     def __init__(self, base_url: Optional[str] = None,
                  timeout: Optional[float] = None,
@@ -63,26 +79,29 @@ class GenieXBridge:
         self.vlm_model = vlm_model or os.environ.get(
             "GENIEX_VLM_MODEL", "qwen2.5-vl-7b-instruct")
 
-    # -- public API (contract v1) -------------------------------------------------
+    # -- public API (contract v2) -------------------------------------------------
 
     def health(self) -> dict:
         return self._request("GET", "/v1/health")
 
-    def chat(self, model: str, messages: List[dict], max_tokens: int = 2048,
-             temperature: float = 0.0) -> dict:
+    def chat_completions(self, model: str, messages: List[dict],
+                         max_tokens: int = 2048,
+                         temperature: float = 0.0) -> dict:
+        """OpenAI-compatible POST /v1/chat/completions. Returns the raw
+        OpenAI-shaped response dict (choices, usage, ...)."""
         return self._request("POST", "/v1/chat/completions", body={
             "model": model,
             "messages": messages,
-            "maxTokens": max_tokens,
+            "max_tokens": max_tokens,
             "temperature": temperature,
         })
 
-    def vision(self, model: str, image_bytes: bytes, prompt: str) -> dict:
-        return self._request("POST", "/v1/vision", body={
-            "model": model,
-            "imageBase64": base64.b64encode(image_bytes).decode("ascii"),
-            "prompt": prompt,
-        })
+    def vision_description(self, model: str, image_bytes: bytes, prompt: str,
+                           max_tokens: int = 512) -> dict:
+        """VLM inference through the SAME chat completions endpoint using
+        multimodal image content (no separate vision endpoint)."""
+        return self.chat_completions(model, [image_message(prompt, image_bytes)],
+                                     max_tokens=max_tokens)
 
     # -- transport ------------------------------------------------------------------
 

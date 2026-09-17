@@ -1,20 +1,21 @@
-"""GenieX model adapters: ModelPort implementations over the local
-Android GenieX bridge (Phase 11 local-model integration).
+"""GenieX model adapters: ModelPort implementations over the Android
+GenieX loopback bridge (contract v2, OpenAI-compatible).
 
 - GenieXModelPort: text model (Qwen3-4B) for reasoning/tool-calling/agent
   work, routed per ModelRole through ModelRouter.
 - GenieXVisionModelPort: vision/UI capability (Qwen2.5-VL-7B) exposed as a
-  SEPARATE capability (describe_image), never mixed into text routing.
+  SEPARATE capability (describe_image) over the same chat completions
+  endpoint with multimodal image content - never mixed into text routing.
 
 Boundaries (ARCHITECTURE s5.10, INTERFACES s14/s15): the adapters know the
 bridge; the Core knows neither. Everything the bridge returns is a model
 claim: tool calls become proposals through the ExecutionPipeline, content
 is never verification, and a bridge failure surfaces as an empty
-malformed response so the governed loop never crashes.
+provider_error response so the governed loop never crashes.
 """
 from __future__ import annotations
 
-import os
+import json
 from typing import Optional
 
 from core import ModelResponse, ToolCall
@@ -22,6 +23,44 @@ from core.enums import ModelRole
 
 from .model_port import ModelPort
 from .router import ModelRouter
+
+
+def _parse_openai_response(result: dict) -> ModelResponse:
+    """Translate the OpenAI-compatible response into a ModelResponse.
+    Lenient on read (tool-call arguments may be a string or an object);
+    anything unparseable degrades to empty content, never an exception."""
+    content = ""
+    tool_calls = []
+    usage = None
+    finish_reason = "stop"
+    try:
+        choices = result.get("choices") or []
+        if choices:
+            message = choices[0].get("message") or {}
+            content = str(message.get("content") or "")
+            for raw in message.get("tool_calls") or []:
+                if not isinstance(raw, dict):
+                    continue
+                function = raw.get("function") if isinstance(raw.get("function"), dict) else {}
+                arguments = function.get("arguments", {})
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except json.JSONDecodeError:
+                        arguments = {}
+                if not isinstance(arguments, dict):
+                    arguments = {}
+                tool_calls.append(ToolCall(
+                    id=str(raw.get("id", "")),
+                    name=str(function.get("name", "")),
+                    arguments=arguments,
+                ))
+            finish_reason = str(choices[0].get("finish_reason", "stop"))
+        usage = result.get("usage") if isinstance(result.get("usage"), dict) else None
+    except Exception:
+        return ModelResponse(content="", toolCalls=[], finishReason="provider_error")
+    return ModelResponse(content=content, toolCalls=tool_calls, usage=usage,
+                         finishReason=finish_reason)
 
 
 class GenieXModelPort(ModelPort):
@@ -43,30 +82,15 @@ class GenieXModelPort(ModelPort):
         if not messages:
             messages = [{"role": "user", "content": ""}]
         try:
-            result = self.bridge.chat(self.model, messages,
-                                      max_tokens=self.max_tokens,
-                                      temperature=self.temperature)
+            result = self.bridge.chat_completions(
+                self.model, messages, max_tokens=self.max_tokens,
+                temperature=self.temperature)
+            return _parse_openai_response(result)
         except Exception:
-            # bridge failure: an empty malformed response; the driver
+            # bridge failure: an empty provider_error response; the driver
             # journals the failed MODEL_CALL and the loop continues safely
             return ModelResponse(content="", toolCalls=[],
                                  finishReason="provider_error")
-        tool_calls = []
-        for raw in result.get("toolCalls") or []:
-            if not isinstance(raw, dict):
-                continue
-            tool_calls.append(ToolCall(
-                id=str(raw.get("id", "")),
-                name=str(raw.get("name", "")),
-                arguments=raw.get("arguments") if isinstance(raw.get("arguments"), dict)
-                else {},
-            ))
-        return ModelResponse(
-            content=str(result.get("content", "")),
-            toolCalls=tool_calls,
-            usage=result.get("usage") if isinstance(result.get("usage"), dict) else None,
-            finishReason=str(result.get("finishReason", "stop")),
-        )
 
 
 class GenieXVisionModelPort:
@@ -79,10 +103,10 @@ class GenieXVisionModelPort:
 
     def describe_image(self, image_bytes: bytes, prompt: str) -> str:
         try:
-            result = self.bridge.vision(self.model, image_bytes, prompt)
+            result = self.bridge.vision_description(self.model, image_bytes, prompt)
+            return _parse_openai_response(result).content
         except Exception:
             return ""  # capability failure surfaces as an empty description
-        return str(result.get("content", ""))
 
 
 def build_geniex_router(bridge, llm_model: Optional[str] = None,
