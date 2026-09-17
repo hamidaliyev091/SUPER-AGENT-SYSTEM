@@ -90,7 +90,16 @@ class ModelPortDriver:
                                  actor_id=f"{self.role.value}-port")
 
     def generate(self, task) -> ModelResponse:
-        response = self._generate(self.build_request(task))
+        try:
+            response = self._generate(self.build_request(task))
+        except Exception as exc:
+            # a failing provider (bridge down, timeout, malformed adapter)
+            # must never crash the governed loop: it becomes an empty
+            # response with no tool calls and a recorded error marker
+            response = ModelResponse(content="", toolCalls=[],
+                                     finishReason="provider_error")
+            self.errors = getattr(self, "errors", [])
+            self.errors.append(str(exc))
         if not isinstance(response, ModelResponse):
             response = ModelResponse(content=str(response), finishReason="malformed")
         self.calls += 1

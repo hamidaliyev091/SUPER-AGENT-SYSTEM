@@ -173,3 +173,16 @@ Each candidate mechanism was evaluated against the code, not the idea:
 **Provenance:** no third-party code was copied; the licenses above would permit reuse but nothing was worth reusing. The audit reports (with fetched URLs) are summarized here; the full raw URLs are in the session transcript.
 
 **Consequences:** SAS remains stdlib-only, zero-dependency, with an authority model none of the surveyed frameworks implements (code-based verification and completion authority do not exist in any of them). Release proceeds on the audited baseline.
+
+## ADR-017 — GenieX bridge contract and boundaries (2026-09-17)
+
+**Context:** The GenieX Android layer exposes local NPU models (Qwen3-4B text, Qwen2.5-VL vision). No inference API spec existed; the integration needed a defined boundary that keeps model weights out of the repository and preserves every SAS authority invariant.
+
+**Decisions:**
+
+1. **The bridge is a versioned loopback HTTP contract owned by SAS.** The GenieX app implements GET /v1/health, POST /v1/chat/completions, POST /v1/vision exactly as specified in docs/implementation/GENIEX_BRIDGE.md; the SAS client enforces loopback-only URLs and stable error codes. The reference server (tests/support/geniex_server.py) is both the test double and the implementation reference.
+2. **Vision is a separate capability, not a ModelRole.** The VLM is exposed as GenieXVisionModelPort.describe_image - model output describing an image/screen, never mixed into text routing and never treated as verification. Text routing maps every ModelRole to the LLM (build_geniex_router).
+3. **Bridge failures never crash the governed loop.** GenieXModelPort converts bridge errors into empty provider_error responses; ModelPortDriver additionally converts any raising provider into an empty response with a journaled MODEL_CALL. Recovery is therefore re-entrant: the next call after the bridge returns simply works.
+4. **No authority crosses the bridge.** Tool calls from the bridge are proposals (policy decides); bridge content is a model claim (code assessors verify). Model weights live under ~/SAS-RUNTIME (git-ignored).
+
+**Consequences:** Phase 11s local-model path is complete on the SAS side. The GenieX app endpoint (the three bridge endpoints) is the only remaining device-side piece; until it exists, the full loop runs against the reference server. Cloud providers later implement the same ModelPort surface unchanged.

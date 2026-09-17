@@ -152,3 +152,17 @@ All notable project changes. Dates are UTC.
 
 ### Notes
 - This is release candidate 1.0-rc1. The repository is ready for real use; remaining partial phases (10/11/14) stay blocked on external systems or governance rows as recorded in ADR-015.
+
+## 2026-09-17 — GenieX Android inference integration (local NPU models)
+
+### Added
+- docs/implementation/GENIEX_BRIDGE.md — the authoritative localhost bridge contract (v1): loopback-only HTTP, GET /v1/health, POST /v1/chat/completions (LLM), POST /v1/vision (VLM); model ids qwen3-4b-instruct-2507 and qwen2.5-vl-7b-instruct; security rules (inference-only, no authority, no secrets).
+- src/platforms/termux/geniex_bridge.py — GenieXBridge client (stdlib urllib): stable error codes (LOOPBACK, CONNECTION, TIMEOUT, HTTP, PROTOCOL, CONFIG); loopback-only URL enforcement; env configuration (GENIEX_BRIDGE_URL/TIMEOUT, GENIEX_LLM_MODEL, GENIEX_VLM_MODEL).
+- src/models/geniex.py — GenieXModelPort (text LLM over the bridge; bridge failures become empty provider_error responses so the governed loop never crashes), GenieXVisionModelPort (separate vision capability: describe_image), build_geniex_router (text model serves every ModelRole; vision stays separate).
+- src/models/model_port.py — ModelPortDriver hardened: a raising provider is converted to an empty provider_error response and journaled MODEL_CALL (bridge failure can no longer crash the orchestrator).
+- tests/support/geniex_server.py — reference implementation of the bridge contract (also the test double and the spec reference for the GenieX app endpoint).
+- tests/integration/test_geniex_bridge.py — 11 tests: role routing, LLM request/response, VLM request/response, bridge failure + recovery, timeout handling, HTTP error codes, loopback enforcement, network confined to adapters (architecture boundary), provider replaceability (same and malicious scripts across providers), tool calls still flow through Policy (evil call DENIED, legitimate call reaches DONE).
+- .gitignore — SAS-RUNTIME/ and .runtime/ excluded (model weights and runtime data stay outside the repository).
+
+### Notes
+- ADR-017 records the bridge contract decision and the boundaries. The GenieX app endpoint must implement the contract in GENIEX_BRIDGE.md; until it serves the endpoint, the full local-model loop runs against the reference server.

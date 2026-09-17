@@ -645,7 +645,7 @@ At least one real model can operate the system through the model abstraction.
 
 Status
 
-PARTIAL — Core-side complete (ModelPort/ModelRouter contracts, ModelPortDriver with MODEL_CALL journaling, model-call limit enforcement, scripted-port integration + adversarial tests). Provider adapters (DeepSeek/Claude/Gemini) require provider access and API keys.
+PARTIAL — local-model path complete: GenieX bridge contract + client + Qwen3-4B/Qwen2.5-VL adapters + reference server + 11 integration tests (ADR-017). Remaining: the GenieX app endpoint implementing the bridge contract (device side), and cloud provider adapters (DeepSeek/Claude/Gemini) requiring API keys.
 
 ---
 

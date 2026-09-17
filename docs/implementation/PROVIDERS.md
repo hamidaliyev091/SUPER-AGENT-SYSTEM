@@ -77,3 +77,37 @@ orchestrator.run(task_id)
 
 The orchestrator drives everything else; nothing else changes when a real
 provider replaces the scripted test port.
+
+## GenieX local models (implemented — on-device)
+
+The validated on-device path: the Android GenieX inference layer exposes
+local NPU models through a loopback HTTP bridge, and SAS talks to it via
+the GenieX adapters. See GENIEX_BRIDGE.md for the exact contract (the
+GenieX app endpoint must implement those three endpoints; the reference
+implementation lives in tests/support/geniex_server.py).
+
+Configuration (environment variables, loopback only):
+
+- GENIEX_BRIDGE_URL (default http://127.0.0.1:8765)
+- GENIEX_BRIDGE_TIMEOUT (default 120 seconds)
+- GENIEX_LLM_MODEL (default qwen3-4b-instruct-2507)
+- GENIEX_VLM_MODEL (default qwen2.5-vl-7b-instruct)
+
+Wiring:
+
+```python
+from models import build_geniex_router, ModelPortDriver
+from platforms.termux.geniex_bridge import GenieXBridge
+
+bridge = GenieXBridge()                 # env-configured, loopback-checked
+router, vision = build_geniex_router(bridge)
+driver = ModelPortDriver(task_manager, store, router)
+
+# vision is a separate capability, never part of text routing:
+description = vision.describe_image(screenshot_bytes, "describe this screen")
+```
+
+Security: the bridge is inference-only and loopback-only; its tool calls
+are proposals that pass through Policy like any model output; its content
+is never verification. Model weights live under ~/SAS-RUNTIME and are
+never committed to the repository.
