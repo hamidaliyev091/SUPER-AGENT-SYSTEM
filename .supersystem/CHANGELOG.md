@@ -104,10 +104,6 @@ All notable project changes. Dates are UTC.
 ### Notes
 - ADR-009 records the test-suite architecture and the repair-loop re-entry resolution (REPAIRING -> RECOVERING -> READY -> RUNNING so the execution gate revalidates, resolving the TASK_SCHEMA s22/s33 tension).
 
-### Changed
-- `src/execution/pipeline.py` — malformed (non-ActionRequest) requests now return a structured DENY instead of crashing (ExecutionResult was built before validation).
-- `src/completion/engine.py` — FIXED staleness detection: the check compared actions against the FIRST verification result and returned early; it now compares against the LATEST result so re-verification (e.g. the repair loop) supersedes earlier actions.
-
 ## 2026-09-17 — Phase 9 Fake End-to-End Agent
 
 ### Added
@@ -118,60 +114,16 @@ All notable project changes. Dates are UTC.
 ### Notes
 - ADR-010 records the orchestrator loop semantics (one action per RUNNING pass, observation stage, CONTINUE re-entry, human states stop the loop, claims never read).
 
-## 2026-09-17 — Phases 10/11 Core side: RuntimePort and ModelPort
+## 2026-09-17 — Phases 16-18 Long-Running Autonomy, Delegation, Observability
 
 ### Added
-- `src/core/contracts.py` — ToolCall, ModelRequest, ModelResponse, RuntimeSession, RuntimeEvent contracts (INTERFACES s14/s16), provider- and runtime-independent.
-- `src/models/` — ModelPort (s14: the Core never knows the provider), ModelRouter (s15: role dispatch; selection grants no authority), ModelPortDriver (adapts a port to the orchestrator; journals every MODEL_CALL with usage so model-call limits are externally enforceable; a ModelRouter binds its role at dispatch).
-- `src/runtime/` — RuntimePort (s16: start/send/stop/resume session interface; the Core imports no runtime-specific code).
-- `tests/support/fakes.py` — ScriptedModelPort (reference port over scripted ToolCall turns) and FakeRuntimeAdapter (RuntimePort implementation exposing normalized tool-call events), replacing the plain FakeModel at the integration boundary.
-- `src/completion/compliance.py` — modelCalls is now a recorded dimension: MODEL_CALL journal events are counted against the limit; exceeding it fails completion (RESOURCE_LIMIT_EXCEEDED). retryCount/delegationCount/network/storage remain unrecorded.
-- `tests/integration/test_model_port_flows.py` — 7 tests: orchestrator driven through ModelPort (happy path), model-call accounting + enforcement (repair loop exceeds the budget -> no DONE; within budget -> DONE), malicious tool calls through the port DENIED, router dispatch with no authority from selection, runtime-adapter sessions/events, runtime-driven full flow.
+- `src/orchestration/orchestrator.py` — `run(..., checkpoint_every=N)`: periodic durable checkpoints every N loop iterations via the ContinuityManager (CONTINUITY s7); snapshots never reset budgets (s14).
+- `src/delegation/subagent_manager.py` — SubagentManager: the only delegation path. Subtask creation enforces narrowing (every child scope covered by a parent scope across all scope kinds; every child limit <= parent limit) and consumes the parent's delegationCount budget. A subagent's TAC is its scope, so malicious subagents are denied beyond it by Policy.
+- `src/observability/observer.py` — TaskObserver: read-only reconstruction of task state, action history (STARTED/TERMINAL joined), policy decisions, approvals, verification results, failures, recovery decisions, and model usage from durable records. Cannot leak argument secrets (the journal stores hashes only, s43); a tampered journal fails every view closed.
+- `tests/integration/test_long_running.py` (3 tests), `test_delegation.py` (6), `test_observability.py` (4) — multi-action runs with monotonic checkpoint accounting, interruption survival with budget inheritance, narrowing/limit/budget enforcement, malicious subagent scope escape denial, subtask completion through the same engines, full-history reconstruction without model memory, secret non-leakage, tamper fail-closed.
 
 ### Changed
-- ROADMAP.md: Phases 10 and 11 marked PARTIAL (Core-side complete; concrete PiRuntimeAdapter and provider adapters require the external systems - pi-ultracode API and provider keys). Phase 12 (Termux Runtime) -> NEXT.
+- ROADMAP.md: Phases 16, 17, 18 -> COMPLETE. Remaining: 10/11/14 PARTIAL (external systems / governance rows), 15 DEFERRED, 19/20 FUTURE.
 
 ### Notes
-- ADR-011 records the port-layer decisions, including MODEL_CALL accounting and the PARTIAL status rationale.
-
-## 2026-09-17 — Phase 12 Termux Runtime
-
-### Added
-- `src/platforms/termux/filesystem.py` — TermuxFilesystemAdapter: real fs.read_file/list_directory/stat/write_file tools over the device filesystem via pathlib. Mutation tools register only with a concrete versioned protected-path mapping (PROTECTED_PATHS s14); deletion tools are omitted (no v1 delete scope, ADR-004). Failures are KNOWN_FAILED ToolResults, never escaping exceptions.
-- `src/platforms/termux/environment.py` — TermuxEnvironmentAdapter: termux_api.battery_status/wifi_status/device_info backed by Termux:API binaries (the three registry rows with complete classifications). Missing binaries report TERMUX_API_UNAVAILABLE - never a fake success.
-- `src/platforms/termux/runtime.py` — TermuxRuntimeAdapter: RuntimePort with durable integrity-enveloped sessions under `.pi/sessions/`; sessions survive process restarts and Termux backgrounding (foundation for background execution); binds a ModelPort for normalized tool-call events; local-storage accounting helper.
-- `tests/integration/test_termux_platform.py` — 8 tests: real filesystem tools through policy, protected-mapping enforcement on real paths, KNOWN_FAILED filesystem errors, Termux:API unavailable/parsing branches, durable sessions across adapter restarts, tampered session fail-closed, model-port events through the runtime.
-- NOTE: the package is `src/platforms/` (not `platform`) - a top-level `platform` package shadows Python's stdlib platform module (imported by uuid) and breaks the interpreter.
-
-### Changed
-- ROADMAP.md: Phase 12 status NEXT → COMPLETE; Phase 13 (Termux:API) → NEXT.
-
-### Notes
-- ADR-012 records the package-naming gotcha, the v1 tool-exposure policy (only registry-complete rows), and the durable-session design.
-
-## 2026-09-17 — Phase 13 Termux:API
-
-### Added
-- `tests/integration/test_termux_api.py` — LIVE device test: real termux-battery-status output flows through policy -> audit -> verification -> completion -> DONE (skipped when the binary is absent); plus the notification fail-closed test: termux_api.send_notification stays DENY (no complete matrix row, ADR-004) even when a tool is registered - the tool is never reached.
-- `src/platforms/termux/e2e_demo.py` — on-device end-to-end demonstration (Phase 12 exit criterion): complete governed task with the REAL filesystem adapter (real writes, real reads) from creation to verified DONE. Ran successfully on the device: 9 journal records, final COMPLETION_DECISION.
-- `src/models/scripted.py` — ScriptedModelPort moved from tests to src/models as the reference ModelPort adapter (demos and tests share it).
-
-### Changed
-- `src/verification/engine.py` — FIXED cross-criterion staleness: verify() now collects evidence for ALL criteria first, then assesses and persists results. Previously a later criterion's evidence-collection action was journaled after an earlier criterion's result and falsely marked it stale (RECOVERY_REQUIRES_REVERIFICATION).
-- `src/runtime` renamed to `src/runtimes` (same stdlib/self-shadowing class as platforms: a script inside the package put its own directory ahead of PYTHONPATH).
-- ROADMAP.md: Phase 13 status NEXT → COMPLETE; Phase 14 (Android Capability Layer) → NEXT.
-
-### Notes
-- ADR-013 records the two-phase verification fix.
-
-## 2026-09-17 — Phase 14 Android Capability Layer (v1 subset)
-
-### Added
-- `src/platforms/termux/android.py` — TermuxAndroidAdapter: package.list (pm list packages), package.inspect (pm path), settings.read (settings get system|secure|global) as registry-complete tools. Commands run as argument lists (no shell, no injection surface); device permission denials surface as clean ANDROID_OPERATION_FAILED ToolResults, never crashes.
-- `tests/integration/test_android_capabilities.py` — 5 tests: scope denials for out-of-TAC packages and settings, LIVE package.list on-device through the pipeline (com.termux found), LIVE settings.read (device-agnostic: value or clean failure - this device denies the shell global-settings permission), invalid namespace rejected by the tool.
-
-### Changed
-- ROADMAP.md: Phase 14 PARTIAL (v1 subset; launch/force-stop/settings-write/accessibility require governance matrix rows and an accessibility service); Phase 16 (Long-Running Autonomous Operation) -> NEXT.
-
-### Notes
-- The canonical setting form is the lowercased full target value (e.g. global.device_name), matched against allowedAndroidSettings; the policy matches the TARGET, not the argument.
+- ADR-014 records delegation narrowing semantics, checkpoint cadence, and the observer's read-only contract.

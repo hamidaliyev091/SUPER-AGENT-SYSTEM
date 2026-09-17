@@ -859,7 +859,7 @@ A long-running task can survive interruption and continue safely from durable st
 
 Status
 
-NEXT
+COMPLETE
 
 ---
 
@@ -896,7 +896,7 @@ A malicious subagent cannot obtain more authority than its parent.
 
 Status
 
-PLANNED
+COMPLETE
 
 ---
 
@@ -927,7 +927,7 @@ A task's execution history can be reconstructed from durable records without rel
 
 Status
 
-PLANNED
+COMPLETE
 
 ---
 

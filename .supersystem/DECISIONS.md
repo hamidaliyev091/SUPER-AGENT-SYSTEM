@@ -118,36 +118,14 @@ Rejected: importing OpenHands, LangGraph, Letta, or their components as dependen
 
 **Consequences:** Phase 10 (Pi runtime) and Phase 11 (real models) integrate at the model/runtime boundary only; the loop, policy, verification, and completion semantics are proven Core-side.
 
-## ADR-011 — ModelPort/RuntimePort layer decisions (2026-09-17)
+## ADR-014 — Delegation, checkpointing, and observability decisions (2026-09-17)
 
-**Context:** Phases 10 (Pi Runtime) and 11 (Real Model Integration) require external systems for their full exit criteria (the actual pi-ultracode runtime and provider API keys). Everything implementable Core-side was built; the concrete adapters are explicitly out of reach without those systems. This ADR records both the design and the honest partial status.
-
-**Decisions:**
-
-1. **Port contracts live in core/contracts.py.** ToolCall, ModelRequest, ModelResponse, RuntimeSession, RuntimeEvent are provider/runtime-independent shapes (INTERFACES s14/s16); putting them in Core enforces that adapters depend on Core, never the reverse (ARCHITECTURE s5.10 fitness function).
-2. **Every model call is journaled (MODEL_CALL) before its response is used.** The ModelPortDriver records role + usage + finishReason, closing the modelCalls dimension of TASK_SCHEMA s20. Completion resource compliance now counts MODEL_CALL events; exceeding the limit fails completion. (ADR-007's unrecorded-dimension note is superseded for modelCalls; retryCount/delegationCount/network/storage remain unrecorded.)
-3. **Tool-call translation grants nothing.** ModelPortDriver converts ToolCalls to ActionRequests with actor identity '<role>-port'; policy still evaluates everything (s12). A 'strong' model or a router selection changes no permissions, limits, or verification requirements (s15).
-4. **ModelRouter binds its role in the driver.** The router's generate(role, request) differs from ModelPort.generate(request); the driver wraps routers at construction, keeping one uniform port surface for the orchestrator.
-5. **ROADMAP status PARTIAL is used for Phases 10/11.** Exit criteria genuinely require external systems; marking them COMPLETE would be false, marking them PLANNED would hide the finished Core-side work. The next agent working on this must obtain (a) the pi-ultracode API for PiRuntimeAdapter and (b) provider access for DeepSeek/Claude/Gemini adapters.
-
-**Consequences:** Phase 12 (Termux Runtime) can proceed without external dependencies; Phase 11 provider adapters are thin translation layers over HTTP client libraries when keys arrive. The Core's replaceability is now proven at three boundaries: runtime (FakeRuntimeAdapter), model (ScriptedModelPort), and platform (Phase 8 static check).
-
-## ADR-012 — Termux platform adapter decisions (2026-09-17)
-
-**Context:** Phase 12 builds the Termux platform layer. Three structural decisions needed recording.
+**Context:** Phases 16-18 in one push. Three mechanism choices needed recording.
 
 **Decisions:**
 
-1. **Package name is platforms, never platform.** A top-level platform package shadows the stdlib platform module (imported by uuid and others) and breaks the interpreter. This is a permanent constraint for any future platform code.
-2. **v1 exposes only registry-complete operations.** The filesystem adapter registers read/stat/list/write; deletion is omitted because it has no v1 authorizing scope (ADR-004). The environment adapter exposes only battery/wifi/device status - the termux_api rows with complete classifications. process.* remains unregistered (DENY by matrix construction, ADR-004). The adapters therefore cannot even be reached for operations the policy layer would deny; defense in depth, not a substitute for policy.
-3. **TermuxRuntimeAdapter sessions are durable and integrity-enveloped.** Sessions persist under .pi/sessions/ with the standard envelope, so a killed/backgrounded Termux process restarts sessions without losing state (CONTINUITY s21, s22). send() produces normalized RuntimeEvents from the bound ModelPort; the adapter holds no authority of its own.
+1. **Delegation is creation with enforced narrowing.** A subagent has no special privileges: its authority is its own TargetAuthorizationContext, which must be covered scope-by-scope by the parent's, and its limits must not exceed the parent's. Delegation itself spends the parent's delegationCount. No other delegation path exists (SubagentManager is the only creator of parentTaskId-linked tasks); subagent actions run through the same pipeline as everyone else.
+2. **Periodic checkpointing lives in the orchestrator.** run(checkpoint_every=N) snapshots after every N loop iterations through the ContinuityManager (which derives usage from the verified journal - s14 budget continuity holds by construction). The checkpoint guard excludes terminal and human-required states.
+3. **Observability is a reader, never a writer.** TaskObserver reconstructs everything from verified durable records and holds no authority. Because the journal stores argument hashes and never tool outputs, the reconstructed history is inherently secret-free; tampering fails every view closed with JournalIntegrityError.
 
-**Consequences:** Phase 13 (Termux:API) registers the remaining structured API tools as their policy rows permit, and Phase 14 (Android capabilities) follows the same exposure rule: registry-complete rows only, everything through the ExecutionPipeline.
-
-## ADR-013 — Two-phase verification collection (2026-09-17)
-
-**Context:** The live Termux:API test exposed a cross-criterion defect: verify() evaluated criteria sequentially (collect -> assess -> persist per criterion), so a later criterion's evidence-collection ACTION_STARTED was journaled after an earlier criterion's VERIFICATION_RESULT. The Completion Engine's staleness check (s20) then correctly - but wrongly in intent - flagged the earlier criterion as verified-before-later-actions, blocking DONE on a fresh, successful verification pass.
-
-**Decision:** verify() is now two-phase: Phase A collects evidence for every selected criterion (all policy-governed actions journaled first), Phase B assesses and durably persists each result. All results are therefore written after all collection actions, so a single verification pass can never self-invalidate. Mutations between passes still invalidate (Phase 6 staleness unchanged).
-
-**Consequences:** Verification results describe one coherent snapshot of observed state. The Phase 6 staleness semantics are untouched; multi-criterion tasks (the common case for real objectives) now complete deterministically.
+**Consequences:** Phases 19/20 (optimization, capability expansion) are the only remaining non-external roadmap work; they can build on the observer for their own verification.
