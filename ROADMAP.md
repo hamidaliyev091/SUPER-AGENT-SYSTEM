@@ -645,7 +645,7 @@ At least one real model can operate the system through the model abstraction.
 
 Status
 
-PARTIAL — local-model path complete: GenieX bridge contract + client + Qwen3-4B/Qwen2.5-VL adapters + reference server + 11 integration tests (ADR-017). Remaining: the GenieX app endpoint implementing the bridge contract (device side), and cloud provider adapters (DeepSeek/Claude/Gemini) requiring API keys.
+COMPLETE for the local-model path: the Android GenieX app now hosts the real loopback bridge (foreground service, OpenAI-compatible v2 contract, single-resident NPU models with swap-on-demand), verified on-device with real Qwen3-4B and Qwen2.5-VL inference (TTFT/prefill/decode recorded) AND a real end-to-end SAS task reaching DONE with the real NPU model proposing the tool call through Policy (ADR-018). Cloud provider adapters (DeepSeek/Claude/Gemini) remain optional and need API keys.
 
 ---
 

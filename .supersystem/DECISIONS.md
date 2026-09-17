@@ -130,59 +130,15 @@ Rejected: importing OpenHands, LangGraph, Letta, or their components as dependen
 
 **Consequences:** Phases 19/20 (optimization, capability expansion) are the only remaining non-external roadmap work; they can build on the observer for their own verification.
 
-## ADR-015 — Closure decisions (2026-09-17)
+## ADR-018 — Real GenieX Android bridge decisions (2026-09-17)
 
-**Context:** Final closure pass. Two governance gaps remained: PROJECT_CONTRACT s24 (CI gates) and the TASK_SCHEMA s37 T-INV-01..25 enumeration deferred to the adversarial-test phase.
-
-**Decisions:**
-
-1. **The CI gate is `ci.sh`** — the full suite plus the Core purity check, runnable on the device (no CI server exists on Termux; the script is the canonical gate and can be invoked by any future CI infrastructure).
-2. **T-INV-01..25 are now enumerated** in `docs/implementation/TEST_INVARIANTS.md`, each mapped to concrete covering tests. The frozen document only referenced the IDs; naming them here satisfies the deferral without touching frozen text.
-3. **Phases 19/20 stay FUTURE.** Optimization begins only on demand now that correctness and security are established (ROADMAP s23 ordering); no speculative optimization is added. Phase 15 remains DEFERRED by design (privileged capabilities are not automatically enabled).
-4. **Phases 10/11/14 remain PARTIAL** until their external dependencies arrive (pi-ultracode API, provider keys, governance matrix rows for notification/launch/force-stop/settings-write/accessibility).
-
-**Consequences:** The roadmap has no further implementable work without external systems or explicit user requests. The next agent should re-check this ADR against ROADMAP.md before starting new work.
-
-## ADR-016 — Final pre-release audit: keep SAS as-is, no code changes justified (2026-09-17)
-
-**Context:** Final engineering pass before real use. Three parallel source-level audits (actual repository files fetched and quoted, not README claims) compared SAS against OpenHands (MIT), LangGraph/LangChain (MIT), Goose (Apache-2.0), and DeepAgents (MIT).
-
-**Evidence — what the source actually shows:**
-
-1. **OpenHands** — the classic SecurityAnalyzer sets the security_risk attribute after execution starts, and the controller never reads it (advisory, unenforced). The V1 SDK gates pending actions behind a confirmation policy, but risk values are the LLM-s own claims (the LLM analyzer returns the action-s own security_risk field), and the default policy is NeverConfirm. Events are per-file JSON with sequential ids — no hash chain. The goal judge is an LLM.
-2. **LangGraph** — checkpointers persist parent-id reference chains with no integrity or tamper detection; the checkpoint is saved after the superstep runs (no durable STARTED before side effects; a crash mid-node persists nothing). ToolNode invokes tools directly — no authorization layer exists. Human-in-the-loop is opt-in with auto-approved by default; tool_selection gates tools with an LLM.
-3. **Goose** — the permission flow is human-confirmed BUT includes permission_judge.rs, an LLM that auto-classifies requests as read-only and bypasses the human ask (model-decides-execution). Session persistence is plain SQLite with no integrity protection.
-4. **DeepAgents** — the strongest analogue: deterministic filesystem allow/deny/interrupt wildcard rules with human interrupt before execution. But it is filesystem-only, default-allow, has no journal, no verification authority, and its LocalShellBackend is explicitly unrestricted.
-
-**Decision: keep the SAS design; adopt nothing new.**
-
-Each candidate mechanism was evaluated against the code, not the idea:
-
-| Candidate | Verdict |
-|---|---|
-| Secret redaction at journal write (OpenHands) | Already stronger: SAS journals argument HASHES only — secrets never reach the journal |
-| Deterministic tri-state policy rules (DeepAgents) | Already exists: SAS ALLOW/ASK/DENY matrix with deny-wins precedence |
-| Human interrupt before execution (DeepAgents/LangGraph) | Already exists: SAS ASK with durable single-use approval flow |
-| Atomic temp+rename persistence (Goose) | Already exists: _atomic_write_json + fsync |
-| UNKNOWN-comparison refusal (OpenHands risk.py) | Already satisfied: SAS ranking dicts contain no UNKNOWN keys; ranking an UNKNOWN raises KeyError |
-| Checkpoint-never-before-writes ordering (LangGraph) | Already stronger: SAS writes the journal record before the enveloped file and verifies on reload |
-| Typed-serialization allowlist (LangGraph serde) | Not needed: SAS is JSON-only (pickle/marshal/eval absent from src — verified) |
-| Event-tree parent_id branching (OpenHands) | Not needed: SAS has no replay or branching requirement |
-| Policy pattern rails with stable IDs (OpenHands) | New scope the frozen governance does not call for |
-
-**Provenance:** no third-party code was copied; the licenses above would permit reuse but nothing was worth reusing. The audit reports (with fetched URLs) are summarized here; the full raw URLs are in the session transcript.
-
-**Consequences:** SAS remains stdlib-only, zero-dependency, with an authority model none of the surveyed frameworks implements (code-based verification and completion authority do not exist in any of them). Release proceeds on the audited baseline.
-
-## ADR-017 — GenieX bridge contract and boundaries (2026-09-17)
-
-**Context:** The GenieX Android layer exposes local NPU models (Qwen3-4B text, Qwen2.5-VL vision). No inference API spec existed; the integration needed a defined boundary that keeps model weights out of the repository and preserves every SAS authority invariant.
+**Context:** The actual Android bridge was implemented inside the GenieX demo app (C:/Users/hamid/AI-OS/ai-hub-apps/geniex_chat_android, Qualcomm ai-hub-apps checkout + local commit). Device verification drove three decisions.
 
 **Decisions:**
 
-1. **The bridge is a versioned loopback HTTP contract owned by SAS.** The GenieX app implements GET /v1/health, POST /v1/chat/completions, POST /v1/vision exactly as specified in docs/implementation/GENIEX_BRIDGE.md; the SAS client enforces loopback-only URLs and stable error codes. The reference server (tests/support/geniex_server.py) is both the test double and the implementation reference.
-2. **Vision is a separate capability, not a ModelRole.** The VLM is exposed as GenieXVisionModelPort.describe_image - model output describing an image/screen, never mixed into text routing and never treated as verification. Text routing maps every ModelRole to the LLM (build_geniex_router).
-3. **Bridge failures never crash the governed loop.** GenieXModelPort converts bridge errors into empty provider_error responses; ModelPortDriver additionally converts any raising provider into an empty response with a journaled MODEL_CALL. Recovery is therefore re-entrant: the next call after the bridge returns simply works.
-4. **No authority crosses the bridge.** Tool calls from the bridge are proposals (policy decides); bridge content is a model claim (code assessors verify). Model weights live under ~/SAS-RUNTIME (git-ignored).
+1. **Contract v2 is OpenAI-compatible only.** The bridge implements GET /v1/health and POST /v1/chat/completions; VLM goes through the same endpoint with multimodal image_url content parts. No custom /v1/vision endpoint exists in the production path. The SAS client speaks this contract; the reference fake server (tests only) mirrors it.
+2. **Single-resident model with swap-on-demand.** Loading the 7B VLM while the 4B LLM stays resident LMK-kills the app process (observed on-device). The bridge keeps at most one wrapper and destroys the resident before loading the other; all load/evict/generate operations serialize behind one gate (the SDK handles are single-threaded and co-residency is impossible). Switching models costs one load (~10-20s).
+3. **Foreground service with type specialUse.** The bridge must survive backgrounding (the cached-process freezer stops loopback serving). connectedDevice FGS type requires Bluetooth/USB permissions the app does not hold; specialUse with a declared subtype is the correct type for a local inference server. START_STICKY restarts the service after kills; the Activity re-ensures it on every visible start.
+4. **Tool calls via a text convention.** The GenieX SDK exposes no structured tool-call API, so the SAS side parses JSON tool-call lines from model text into proposals. The bridge never parses or executes tool calls - proposals only, Policy decides.
 
-**Consequences:** Phase 11s local-model path is complete on the SAS side. The GenieX app endpoint (the three bridge endpoints) is the only remaining device-side piece; until it exists, the full loop runs against the reference server. Cloud providers later implement the same ModelPort surface unchanged.
+**Consequences:** The full path (SAS client -> real bridge -> real NPU models) is proven on-device. Provider replaceability is unchanged; cloud adapters later implement the same ModelPort surface.

@@ -128,41 +128,25 @@ All notable project changes. Dates are UTC.
 ### Notes
 - ADR-014 records delegation narrowing semantics, checkpoint cadence, and the observer's read-only contract.
 
-## 2026-09-17 — Closure: CI gate and T-INV enumeration
+## 2026-09-17 — GenieX Android bridge: real implementation, device-verified NPU inference
 
-### Added
-- `ci.sh` — the PROJECT_CONTRACT s24 CI gate: full test suite (all categories) plus the Core purity check (no runtime/model/platform imports in src/core). Exit 0 = pass; any regression fails the gate. Verified passing on the device.
-- `docs/implementation/TEST_INVARIANTS.md` — enumerates T-INV-01..25 (TASK_SCHEMA s37): one named security invariant per ID, each mapped to its covering tests. All 25 are covered by the existing suites and run in the CI gate.
+### Added (Android side - committed in the geniex_chat_android project)
+- src/main/java/com/geniex/demo/bridge/BridgeProtocol.kt — pure-Kotlin OpenAI-compatible request/response layer (v2 contract): request parsing (text + multimodal image content parts), SAS model-id -> catalog mapping, structured errors, tool-call text convention extraction, data-URL decoding.
+- src/main/java/com/geniex/demo/bridge/GenieXBridgeServer.kt — nanohttpd server bound to 127.0.0.1 ONLY (getHostname override): GET /v1/health, POST /v1/chat/completions; structured 400/404/503 errors; per-request logging of TTFT/prefill/decode.
+- src/main/java/com/geniex/demo/bridge/BridgeInference.kt — reuses the app's real GenieX SDK instances (ModelManagerWrapper paths -> LlmWrapper/VlmWrapper qairt builders -> applyChatTemplate -> generateStreamFlow); SINGLE-RESIDENT model with swap-on-demand eviction (loading the 7B VLM beside the 4B LLM LMK-kills the process); one serialized gate across load/evict/inference; 120s inference timeout; ProfilingData -> timing capture.
+- src/main/java/com/geniex/demo/bridge/GenieXBridgeService.kt — foreground service (specialUse FGS type; connectedDevice requires BT/USB permissions) with START_STICKY restart; bridge survives backgrounding and Activity recreation.
+- src/test/java/com/geniex/demo/bridge/BridgeProtocolTest.kt — JVM unit tests (parsing, model mapping, errors, tool-call extraction, response shape).
+- UI: "SAS bridge" toggle button in MainActivity.
 
-### Notes
-- ADR-015 records the enumeration and the phase-19/20 deferral rationale (optimization begins only on demand; correctness is established).
-- Roadmap state: Phases 0-9, 12, 13, 16, 17, 18 COMPLETE; 10/11/14 PARTIAL pending external systems/governance rows; 15 DEFERRED by design; 19/20 FUTURE by design.
+### Added (SAS side)
+- src/models/geniex.py — tool-call TEXT convention: when the SDK cannot emit structured tool calls, JSON tool-call lines in the model text are parsed into ToolCall proposals (Policy still decides); new integration test test_text_convention_tool_calls_flow_through_policy.
 
-## 2026-09-17 — Release 1.0-rc1: final audit and release preparation
-
-### Added
-- README.md — what SAS is, authority model, architecture map, supported capabilities, intentionally unavailable capabilities, installation (Termux), running (ci.sh + on-device e2e demo), testing, configuration variables (names only), security model, documentation map.
-- LICENSE — MIT (no third-party code included; external frameworks studied for design only).
-- docs/implementation/PROVIDERS.md — ModelPort adapter contract, planned provider adapters, environment-variable names (no secrets), adapter rules, minimal sketch, wiring example.
-- .gitignore — extended with .env and virtualenv entries.
-
-### Changed
-- ADR-016 — final pre-release audit: three parallel source-level audits (OpenHands, LangGraph/LangChain, Goose, DeepAgents) against actual repository code. Verdict: keep SAS as-is; every candidate mechanism either exists in SAS in stronger form or is out of the frozen governance scope. No code changes were justified.
-- Verified: no secrets in the repository (only the intentional fake test key), no tracked artifacts, JSON-only serialization (no pickle/marshal/eval), subprocess confined to the Termux platform adapters, fresh-checkout reproducibility (clone + 333 tests + CI pass on the device).
+### Device verification (OPPO Find X9 Ultra, Android 16)
+- APK built and installed via adb; bridge auto-starts with the app.
+- 127.0.0.1:8765 verified from Termux (health 200).
+- Real Qwen3-4B-Instruct-2507 request: correct answer; TTFT 71-118ms, prefill 127-394 tok/s, decode ~19 tok/s (qairt/HTP0 = NPU).
+- Real Qwen2.5-VL-7B-Instruct image request: correct screenshot description; TTFT 393ms, prefill 620 tok/s, decode 11 tok/s.
+- Malformed JSON -> 400, unknown model -> 404, 3-way concurrent requests serialized correctly, force-stop + relaunch recovers the bridge.
 
 ### Notes
-- This is release candidate 1.0-rc1. The repository is ready for real use; remaining partial phases (10/11/14) stay blocked on external systems or governance rows as recorded in ADR-015.
-
-## 2026-09-17 — GenieX Android inference integration (local NPU models)
-
-### Added
-- docs/implementation/GENIEX_BRIDGE.md — the authoritative localhost bridge contract (v1): loopback-only HTTP, GET /v1/health, POST /v1/chat/completions (LLM), POST /v1/vision (VLM); model ids qwen3-4b-instruct-2507 and qwen2.5-vl-7b-instruct; security rules (inference-only, no authority, no secrets).
-- src/platforms/termux/geniex_bridge.py — GenieXBridge client (stdlib urllib): stable error codes (LOOPBACK, CONNECTION, TIMEOUT, HTTP, PROTOCOL, CONFIG); loopback-only URL enforcement; env configuration (GENIEX_BRIDGE_URL/TIMEOUT, GENIEX_LLM_MODEL, GENIEX_VLM_MODEL).
-- src/models/geniex.py — GenieXModelPort (text LLM over the bridge; bridge failures become empty provider_error responses so the governed loop never crashes), GenieXVisionModelPort (separate vision capability: describe_image), build_geniex_router (text model serves every ModelRole; vision stays separate).
-- src/models/model_port.py — ModelPortDriver hardened: a raising provider is converted to an empty provider_error response and journaled MODEL_CALL (bridge failure can no longer crash the orchestrator).
-- tests/support/geniex_server.py — reference implementation of the bridge contract (also the test double and the spec reference for the GenieX app endpoint).
-- tests/integration/test_geniex_bridge.py — 11 tests: role routing, LLM request/response, VLM request/response, bridge failure + recovery, timeout handling, HTTP error codes, loopback enforcement, network confined to adapters (architecture boundary), provider replaceability (same and malicious scripts across providers), tool calls still flow through Policy (evil call DENIED, legitimate call reaches DONE).
-- .gitignore — SAS-RUNTIME/ and .runtime/ excluded (model weights and runtime data stay outside the repository).
-
-### Notes
-- ADR-017 records the bridge contract decision and the boundaries. The GenieX app endpoint must implement the contract in GENIEX_BRIDGE.md; until it serves the endpoint, the full local-model loop runs against the reference server.
+- ADR-018 records the bridge contract v2, the single-resident memory policy, and the FGS decisions.

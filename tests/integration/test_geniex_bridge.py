@@ -276,6 +276,60 @@ class GenieXBridgeTests(VerificationTestBase):
             self.assertEqual(self.writes, [])
             self.files.pop("/data/out/x.txt", None)
 
+    def test_text_convention_tool_calls_flow_through_policy(self):
+        """The SDK cannot emit structured tool calls; the model returns a
+        JSON tool-call line in its text (bridge v2 convention). The SAS
+        port parses it into a proposal - Policy still decides."""
+        task = self.make_task(stop_at=TaskState.CREATED)
+
+        def chat(request):
+            if len(self.bridge.chat_requests) == 1:
+                return openai_response(
+                    request["model"],
+                    content='{"id":"tc-1","type":"function","function":{"name":'
+                            '"fs.write_file","arguments":{"path":"/data/out/x.txt",'
+                            '"content":"HELLO"}}}',
+                    finish_reason="stop")
+            return openai_response(request["model"])
+
+        self.bridge.chat_handler = chat
+        driver = ModelPortDriver(self.mgr, self.store,
+                                 GenieXModelPort(self.client()))
+        orchestrator = Orchestrator(
+            self.mgr, self.pipeline, self.engine,
+            CompletionEngine(self.mgr, self.store), driver,
+            recovery=RecoveryManager(self.mgr, self.store))
+        final = orchestrator.run(task.id, max_iterations=60)
+        self.assertIs(final.state, TaskState.DONE)
+        self.assertEqual(self.files.get("/data/out/x.txt"), "HELLO")
+
+    def test_fenced_json_tool_calls_flow_through_policy(self):
+        """Real models wrap tool-call JSON in markdown fences; the parser
+        accepts that form too - Policy still decides."""
+        task = self.make_task(stop_at=TaskState.CREATED)
+
+        def chat(request):
+            if len(self.bridge.chat_requests) == 1:
+                return openai_response(
+                    request["model"],
+                    content='I will write the file now.\n```json\n'
+                            '{"id":"tc-2","type":"function","function":{"name":'
+                            '"fs.write_file","arguments":{"path":"/data/out/x.txt",'
+                            '"content":"HELLO"}}}\n```\nDone.',
+                    finish_reason="stop")
+            return openai_response(request["model"])
+
+        self.bridge.chat_handler = chat
+        driver = ModelPortDriver(self.mgr, self.store,
+                                 GenieXModelPort(self.client()))
+        orchestrator = Orchestrator(
+            self.mgr, self.pipeline, self.engine,
+            CompletionEngine(self.mgr, self.store), driver,
+            recovery=RecoveryManager(self.mgr, self.store))
+        final = orchestrator.run(task.id, max_iterations=60)
+        self.assertIs(final.state, TaskState.DONE)
+        self.assertEqual(self.files.get("/data/out/x.txt"), "HELLO")
+
     def test_geniex_tool_calls_still_flow_through_policy(self):
         """The bridge returns tool calls; they are proposals, never
         authority: an out-of-scope call is DENIED, a legitimate one runs."""
