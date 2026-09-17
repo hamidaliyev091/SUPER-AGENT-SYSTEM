@@ -129,3 +129,16 @@ Rejected: importing OpenHands, LangGraph, Letta, or their components as dependen
 3. **Observability is a reader, never a writer.** TaskObserver reconstructs everything from verified durable records and holds no authority. Because the journal stores argument hashes and never tool outputs, the reconstructed history is inherently secret-free; tampering fails every view closed with JournalIntegrityError.
 
 **Consequences:** Phases 19/20 (optimization, capability expansion) are the only remaining non-external roadmap work; they can build on the observer for their own verification.
+
+## ADR-015 — Closure decisions (2026-09-17)
+
+**Context:** Final closure pass. Two governance gaps remained: PROJECT_CONTRACT s24 (CI gates) and the TASK_SCHEMA s37 T-INV-01..25 enumeration deferred to the adversarial-test phase.
+
+**Decisions:**
+
+1. **The CI gate is `ci.sh`** — the full suite plus the Core purity check, runnable on the device (no CI server exists on Termux; the script is the canonical gate and can be invoked by any future CI infrastructure).
+2. **T-INV-01..25 are now enumerated** in `docs/implementation/TEST_INVARIANTS.md`, each mapped to concrete covering tests. The frozen document only referenced the IDs; naming them here satisfies the deferral without touching frozen text.
+3. **Phases 19/20 stay FUTURE.** Optimization begins only on demand now that correctness and security are established (ROADMAP s23 ordering); no speculative optimization is added. Phase 15 remains DEFERRED by design (privileged capabilities are not automatically enabled).
+4. **Phases 10/11/14 remain PARTIAL** until their external dependencies arrive (pi-ultracode API, provider keys, governance matrix rows for notification/launch/force-stop/settings-write/accessibility).
+
+**Consequences:** The roadmap has no further implementable work without external systems or explicit user requests. The next agent should re-check this ADR against ROADMAP.md before starting new work.

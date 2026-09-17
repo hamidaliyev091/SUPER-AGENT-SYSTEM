@@ -127,3 +127,13 @@ All notable project changes. Dates are UTC.
 
 ### Notes
 - ADR-014 records delegation narrowing semantics, checkpoint cadence, and the observer's read-only contract.
+
+## 2026-09-17 — Closure: CI gate and T-INV enumeration
+
+### Added
+- `ci.sh` — the PROJECT_CONTRACT s24 CI gate: full test suite (all categories) plus the Core purity check (no runtime/model/platform imports in src/core). Exit 0 = pass; any regression fails the gate. Verified passing on the device.
+- `docs/implementation/TEST_INVARIANTS.md` — enumerates T-INV-01..25 (TASK_SCHEMA s37): one named security invariant per ID, each mapped to its covering tests. All 25 are covered by the existing suites and run in the CI gate.
+
+### Notes
+- ADR-015 records the enumeration and the phase-19/20 deferral rationale (optimization begins only on demand; correctness is established).
+- Roadmap state: Phases 0-9, 12, 13, 16, 17, 18 COMPLETE; 10/11/14 PARTIAL pending external systems/governance rows; 15 DEFERRED by design; 19/20 FUTURE by design.
