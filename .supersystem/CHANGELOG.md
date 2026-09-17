@@ -137,3 +137,18 @@ All notable project changes. Dates are UTC.
 ### Notes
 - ADR-015 records the enumeration and the phase-19/20 deferral rationale (optimization begins only on demand; correctness is established).
 - Roadmap state: Phases 0-9, 12, 13, 16, 17, 18 COMPLETE; 10/11/14 PARTIAL pending external systems/governance rows; 15 DEFERRED by design; 19/20 FUTURE by design.
+
+## 2026-09-17 — Release 1.0-rc1: final audit and release preparation
+
+### Added
+- README.md — what SAS is, authority model, architecture map, supported capabilities, intentionally unavailable capabilities, installation (Termux), running (ci.sh + on-device e2e demo), testing, configuration variables (names only), security model, documentation map.
+- LICENSE — MIT (no third-party code included; external frameworks studied for design only).
+- docs/implementation/PROVIDERS.md — ModelPort adapter contract, planned provider adapters, environment-variable names (no secrets), adapter rules, minimal sketch, wiring example.
+- .gitignore — extended with .env and virtualenv entries.
+
+### Changed
+- ADR-016 — final pre-release audit: three parallel source-level audits (OpenHands, LangGraph/LangChain, Goose, DeepAgents) against actual repository code. Verdict: keep SAS as-is; every candidate mechanism either exists in SAS in stronger form or is out of the frozen governance scope. No code changes were justified.
+- Verified: no secrets in the repository (only the intentional fake test key), no tracked artifacts, JSON-only serialization (no pickle/marshal/eval), subprocess confined to the Termux platform adapters, fresh-checkout reproducibility (clone + 333 tests + CI pass on the device).
+
+### Notes
+- This is release candidate 1.0-rc1. The repository is ready for real use; remaining partial phases (10/11/14) stay blocked on external systems or governance rows as recorded in ADR-015.

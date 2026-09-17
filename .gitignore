@@ -1,3 +1,14 @@
+# runtime task state (never committed)
+.pi/
+
+# Python artifacts
 __pycache__/
 *.pyc
-.pi/
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# secrets / environment
+.env
+.env.*

@@ -1134,3 +1134,13 @@ The model provides intelligence.
 
 The Core provides control.
 
+
+---
+
+29. Release Status
+
+Release candidate: 1.0-rc1 (2026-09-17)
+
+- All implementable phases complete; full test suite + CI gate pass on-device.
+- Remaining partial phases (10/11/14) require external systems (pi-ultracode API, provider keys) or governance matrix rows; Phase 15 is deferred by design; Phases 19/20 begin only on demand.
+- Final pre-release audit (ADR-016): source-level comparison with OpenHands, LangGraph, Goose, and DeepAgents found no justified code changes.
