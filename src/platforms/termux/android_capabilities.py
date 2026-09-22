@@ -54,6 +54,21 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _PACKAGE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._]*")
 _GLOBAL_ACTIONS = ("BACK", "HOME")
 
+#: How a node is named by the caller: "<package>#<visible text>". A
+#: snapshot id and a node ref are minted by the device and are meaningful
+#: only inside the observation that produced them, so a caller cannot know
+#: either; it names the node the way a person would, and the ref is
+#: resolved here against an observation taken immediately before the act.
+NODE_LABEL_SEPARATOR = "#"
+
+#: How many on-screen labels a failed resolution offers back. Bounded: a
+#: failure message is a hint, not a node dump.
+RESOLUTION_HINT_LIMIT = 8
+
+
+class NodeResolutionError(Exception):
+    """A named UI node could not be resolved to something to act on."""
+
 #: Operation metadata. Mirrors src/policy/registry.py for these operations;
 #: the registry remains the authority (Tool metadata is descriptive only,
 #: INTERFACES.md s11) and a test asserts the two never drift.
@@ -106,6 +121,51 @@ def png_dimensions(raw: bytes):
     return int(width), int(height)
 
 
+def _bounds(node) -> Optional[list]:
+    """A node's [left, top, right, bottom], or None when malformed."""
+    bounds = node.get("bounds")
+    if (not isinstance(bounds, list) or len(bounds) != 4
+            or not all(isinstance(value, int) for value in bounds)):
+        return None
+    return bounds
+
+
+def _area(node) -> int:
+    bounds = _bounds(node)
+    if bounds is None:
+        return 0
+    left, top, right, bottom = bounds
+    return max(0, right - left) * max(0, bottom - top)
+
+
+def _contains(outer, inner) -> bool:
+    """Whether `outer` holds the point a tap on `inner` would land on."""
+    box, point = _bounds(outer), _bounds(inner)
+    if box is None or point is None:
+        return False
+    centre_x = (point[0] + point[2]) // 2
+    centre_y = (point[1] + point[3]) // 2
+    return box[0] <= centre_x <= box[2] and box[1] <= centre_y <= box[3]
+
+
+def _visible_labels(data) -> str:
+    """The labelled nodes of an observation, bounded, for a failure
+    message that lets the caller name a node that is actually there."""
+    nodes = data.get("nodes")
+    if not isinstance(nodes, list):
+        return "nothing"
+    labels = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        text = str(node.get("text", "")).strip()
+        if text:
+            labels.append(repr(text))
+        if len(labels) >= RESOLUTION_HINT_LIMIT:
+            break
+    return ", ".join(labels) if labels else "no labelled nodes"
+
+
 class TermuxAndroidCapabilityAdapter:
     """Tool surface over the Android capability bridge."""
 
@@ -126,9 +186,9 @@ class TermuxAndroidCapabilityAdapter:
             GLOBAL_ACTION: self._tool(GLOBAL_ACTION, self._global_action,
                                       "Perform a global navigation action (BACK, HOME)"),
             TAP: self._tool(TAP, self._tap,
-                            "Activate a UI node from a retained observation"),
+                            "Activate the UI node labelled <package>#<text>"),
             TYPE_TEXT: self._tool(TYPE_TEXT, self._type_text,
-                                  "Enter text into a UI node from a retained observation"),
+                                  "Enter text into the UI node labelled <package>#<text>"),
         }
 
     def _tool(self, operation_id, operation, description) -> Tool:
@@ -201,19 +261,17 @@ class TermuxAndroidCapabilityAdapter:
         return self._act(GLOBAL_ACTION, {"action": action})
 
     def _tap(self, args, context):
-        node = self._node_arguments(args)
-        if node is None:
-            return self._failure(
-                "ANDROID_OPERATION_FAILED",
-                "tap requires observationId, nodeRef and target")
+        try:
+            node = self._node_arguments(args)
+        except NodeResolutionError as exc:
+            return self._failure("ANDROID_OPERATION_FAILED", str(exc))
         return self._act(TAP, node)
 
     def _type_text(self, args, context):
-        node = self._node_arguments(args)
-        if node is None:
-            return self._failure(
-                "ANDROID_OPERATION_FAILED",
-                "type_text requires observationId, nodeRef and target")
+        try:
+            node = self._node_arguments(args)
+        except NodeResolutionError as exc:
+            return self._failure("ANDROID_OPERATION_FAILED", str(exc))
         text = args.get("text")
         if not isinstance(text, str):
             return self._failure("ANDROID_OPERATION_FAILED", "type_text requires text")
@@ -231,22 +289,98 @@ class TermuxAndroidCapabilityAdapter:
                           sideEffectState=SideEffectState.KNOWN_COMPLETED,
                           timestamp=utcnow_iso(), output=data)
 
-    @staticmethod
-    def _node_arguments(args) -> Optional[dict]:
-        """The node reference an accessibility operation acts on. The ref
-        is only meaningful inside its observation; the device re-resolves
-        it and refuses a stale one."""
+    def _node_arguments(self, args) -> dict:
+        """The node reference an accessibility operation acts on.
+
+        An explicit (observationId, nodeRef, target) triple is passed
+        through as given: the device re-resolves it against its retained
+        snapshots and refuses a stale one. Otherwise the node is named as
+        "<package>#<visible text>" and resolved here.
+
+        Resolution observes the device first, so the ref it returns was
+        minted moments before the act and cannot be stale. It grants
+        nothing: the observation is read-only, and Policy has already
+        evaluated this operation on the target the caller named.
+
+        Raises NodeResolutionError when the named node is not on screen.
+        """
         observation_id = args.get("observationId")
         node_ref = args.get("nodeRef")
         target = args.get("target")
-        if not isinstance(observation_id, str) or not observation_id.strip():
-            return None
-        if not isinstance(node_ref, str) or not node_ref.strip():
-            return None
+        if all(isinstance(value, str) and value.strip()
+               for value in (observation_id, node_ref, target)):
+            return {"observationId": observation_id, "nodeRef": node_ref,
+                    "target": target}
         if not isinstance(target, str) or not target.strip():
-            return None
-        return {"observationId": observation_id, "nodeRef": node_ref,
+            raise NodeResolutionError(
+                "the operation needs a target naming the node, as "
+                "<package>#<visible text>")
+        return self._resolve_node(target)
+
+    def _resolve_node(self, target: str) -> dict:
+        package, separator, label = target.partition(NODE_LABEL_SEPARATOR)
+        package, label = package.strip(), label.strip()
+        if not separator or not package or not label:
+            raise NodeResolutionError(
+                f"target {target!r} is not <package>#<visible text>")
+        try:
+            data = self.bridge.observe(OBSERVE_UI)
+        except AndroidBridgeError as exc:
+            raise NodeResolutionError(
+                f"the device could not be observed to resolve {target!r}: "
+                f"{self._error_code(exc)}") from exc
+        node_ref = self._match_node(data, package, label)
+        if node_ref is None:
+            raise NodeResolutionError(
+                f"no enabled node matching {label!r} in {package} "
+                f"(on screen: {_visible_labels(data)})")
+        snapshot_id = data.get("snapshotId")
+        if not isinstance(snapshot_id, str) or not snapshot_id.strip():
+            raise NodeResolutionError(
+                "the device observation carried no snapshot id")
+        return {"observationId": snapshot_id, "nodeRef": node_ref,
                 "target": target}
+
+    @staticmethod
+    def _match_node(data, package: str, label: str) -> Optional[str]:
+        """The ref of the node `label` names, in `package`.
+
+        A row's label usually lives in a child view that is not itself
+        clickable, so when no matching node is clickable the smallest
+        clickable container holding it is used instead - the thing a
+        person tapping the row would actually hit. The package is checked
+        as well: a node in another app is never what was named.
+        """
+        nodes = data.get("nodes")
+        if not isinstance(nodes, list):
+            return None
+        wanted = label.casefold()
+        scoped = [node for node in nodes
+                  if isinstance(node, dict)
+                  and node.get("packageName") == package
+                  and node.get("enabled", True)]
+        matches = [node for node in scoped
+                   if str(node.get("text", "")).strip().casefold() == wanted]
+        if not matches:
+            matches = [node for node in scoped
+                       if wanted in str(node.get("text", "")).casefold()]
+        if not matches:
+            return None
+        for node in matches:
+            if node.get("clickable"):
+                return node.get("ref")
+        best = None
+        for candidate in scoped:
+            if not candidate.get("clickable"):
+                continue
+            if not any(_contains(candidate, node) for node in matches):
+                continue
+            area = _area(candidate)
+            if best is None or area < best[0]:
+                best = (area, candidate.get("ref"))
+        if best is not None:
+            return best[1]
+        return matches[0].get("ref")
 
     @staticmethod
     def _task_id(context) -> Optional[str]:

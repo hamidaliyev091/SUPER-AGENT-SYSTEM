@@ -117,6 +117,30 @@ The Android bridge maps these identifiers to its GenieX SDK instances.
 Model weights live in GenieX-managed app storage — never in the SAS
 repository or `~/SAS-RUNTIME` (metadata only).
 
+## Two SDK behaviours the bridge must compensate for
+
+Both were found on the device and both are properties of the GenieX SDK, not
+of SAS. They are recorded here because anything else embedding that SDK will
+hit them too.
+
+**The wrapper's context persists across generations.** `LlmWrapper` and
+`VlmWrapper` append to one native context each time `generateStreamFlow` is
+called, and the `prompt_tokens` they report is the per-call delta rather than
+the running total. Two consequences: a request is answered in the light of
+every request before it, and the context eventually overflows, after which
+*every* call fails with "Context length exceeded" until the wrapper is
+rebuilt. The bridge therefore calls `reset()` before each generation
+(`BridgeInference.kt`, both generators) — an OpenAI-shaped endpoint takes the
+whole conversation in `messages`, so one request means one context.
+
+**Only one model may be resident.** Loading the 7B VLM while the 4B LLM stays
+resident exceeds the app's memory budget and the process is LMK-killed
+(observed: `ApplicationExitInfo … reason=LOW_MEMORY … rss=3.0GB`).
+`BridgeInference` keeps at most one model and swaps on demand, so an
+LLM↔VLM switch costs a destroy plus a load (~45 s per switch on the Find X9
+Ultra). A task that interleaves reasoning and vision pays that on every turn;
+a device under memory pressure may not survive several switches in one run.
+
 ## SAS-side configuration
 
 | Environment variable | Default | Meaning |

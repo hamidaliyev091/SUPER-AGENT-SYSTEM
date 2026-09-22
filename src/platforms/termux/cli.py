@@ -83,10 +83,9 @@ TOOL_ARGUMENTS = {
     "android.launch_package": '{"package": "<package id>"}',
     "android.open_url": '{"url": "https://<host>/<path>"}',
     "android.global_action": '{"action": "BACK"|"HOME"}',
-    "accessibility.tap": '{"observationId": "<id>", "nodeRef": "<ref>", '
-                         '"target": "<package>#<node>"}',
-    "accessibility.type_text": '{"observationId": "<id>", "nodeRef": "<ref>", '
-                               '"target": "<package>#<node>", "text": "<text>"}',
+    "accessibility.tap": '{"target": "<package>#<visible text>"}',
+    "accessibility.type_text": '{"target": "<package>#<visible text>", '
+                               '"text": "<text>"}',
 }
 
 
@@ -671,7 +670,8 @@ def _parser() -> argparse.ArgumentParser:
                             metavar="GLOB")
         target.add_argument("--allow-package", action="append", default=[],
                             metavar="PKG",
-                            help="a package the task may launch")
+                            help="a package the task may act on; a package "
+                                 "operation also needs --allow-package-op")
         target.add_argument("--allow-package-op", action="append", default=[],
                             metavar="OP",
                             help="a package operation the task may perform "

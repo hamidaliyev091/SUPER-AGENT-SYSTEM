@@ -33,6 +33,7 @@ from tests.support.capability_server import (
     LAUNCH_PACKAGE,
     OBSERVE_UI,
     SCREENSHOT,
+    TAP,
     TYPE_TEXT,
 )
 
@@ -150,6 +151,23 @@ class CapabilityLoopTests(CapabilityHarness):
         self.assertIs(result.sideEffectState, SideEffectState.KNOWN_FAILED)
         self.assertEqual(self.device.operations, [])
 
+    def test_a_launch_the_device_refused_is_known_failed(self):
+        # The app confirms a launch took effect before reporting success, so
+        # a launch the system refused comes back as ACTION_FAILED rather than
+        # as a "performed" that never happened. A refusal before anything ran
+        # is KNOWN_FAILED - never UNKNOWN - so recovery verifies rather than
+        # blind-retries it.
+        self.device.fail(LAUNCH_PACKAGE, "ACTION_FAILED", times=5)
+
+        result = self.capability_tools[LAUNCH_PACKAGE].execute(
+            {"package": "com.android.settings"}, {"taskId": "t1"})
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error.code, "ANDROID_OPERATION_FAILED")
+        self.assertIs(result.sideEffectState, SideEffectState.KNOWN_FAILED)
+        self.assertFalse(result.error.retryable)
+        self.assertEqual(self.device.operations, [])
+
     def test_an_unavailable_capability_is_bounded_and_blocks(self):
         # The device refuses every attempt; the criterion is local, so the
         # only device traffic here is what the loop itself proposed.
@@ -207,6 +225,69 @@ class CapabilityLoopTests(CapabilityHarness):
         self.assertEqual(self.device.texts()[0], TASK_TEXT)
         self.assertIsNotNone(
             self.approvals.get(task.id, pending[0]["approvalReference"])["consumedAt"])
+
+    # -- naming a node -------------------------------------------------------
+
+    def test_a_node_named_by_its_label_is_resolved_before_the_act(self):
+        # A snapshot id and a node ref are minted by the device, so a model
+        # can know neither. It names the node by the text a person would
+        # read on screen, and the ref is resolved here against an
+        # observation taken moments before the act - so the ref the device
+        # receives is always fresh.
+        result = self.capability_tools[TAP].execute(
+            {"target": "com.termux#Battery"}, {})
+
+        self.assertTrue(result.success, getattr(result.error, "message", ""))
+        self.assertEqual(result.output["nodeRef"], "n1")
+        self.assertEqual(self.device.count(OBSERVE_UI), 1)
+        self.assertEqual(self.device.count(TAP), 1)
+
+    def test_a_label_that_is_not_on_screen_taps_nothing(self):
+        result = self.capability_tools[TAP].execute(
+            {"target": "com.termux#Not On This Screen"}, {})
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error.code, "ANDROID_OPERATION_FAILED")
+        # the refusal names what was there, so the caller can correct
+        # itself on the next turn instead of guessing again
+        self.assertIn("Not On This Screen", result.error.message)
+        self.assertIn("Battery", result.error.message)
+        self.assertEqual(self.device.count(TAP), 0)
+
+    def test_a_node_in_another_package_is_not_what_was_named(self):
+        # the package is the authorizable part of the target: a node that
+        # reports another package is never the one that was named, even
+        # when its text matches
+        result = self.capability_tools[TAP].execute(
+            {"target": "com.android.settings#Battery"}, {})
+
+        self.assertFalse(result.success)
+        self.assertEqual(self.device.count(TAP), 0)
+
+    def test_the_model_can_name_a_node_by_label_through_the_governed_path(self):
+        label = "com.termux#Battery"
+        self.script(self.call(TAP, target=label), self.call(TAP, target=label))
+        task = self.create_task(
+            [criterion_for("ui-node-text-present", "text", text="Battery")],
+            allowedUIActions=["com.termux#*"])
+
+        paused = self.drive(task)
+
+        self.assertIs(paused.state, TaskState.WAITING_USER)
+        self.assertEqual(self.device.count(TAP), 0)
+        pending = self.approvals.pending(task.id)[0]
+        # the operator is asked about the node the caller named, not about
+        # a device-internal ref that means nothing outside its observation
+        self.assertEqual(pending["targetValue"], label)
+
+        self.approvals.grant(task.id, pending["approvalReference"],
+                             approved_by="operator")
+        self.mgr.transition(task.id, TaskState.RECOVERING,
+                            authorization={"kind": "USER", "actor": "operator"})
+        final = self.drive(task)
+
+        self.assertIs(final.state, TaskState.DONE)
+        self.assertEqual(self.device.count(TAP), 1)
 
     def test_a_denied_approval_runs_nothing(self):
         write = f"{self.workspace}/note.txt"
