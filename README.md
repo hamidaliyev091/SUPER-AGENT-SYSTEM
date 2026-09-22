@@ -228,6 +228,9 @@ adapter ships with SAS yet. Nothing in the repository contains secrets.
 - `docs/implementation/ANDROID_CAPABILITIES.md` — the phone capability
   channel: endpoints, token, operation table, verification methods
 - `docs/implementation/GENIEX_BRIDGE.md` — the on-device inference bridge
+- `docs/RUNBOOK.md` — **the operator's every-time procedure**: how to bring
+  the bridge up, declare a task, read a verdict, handle approvals, and what
+  to do when something looks wrong
 
 ## License
 
