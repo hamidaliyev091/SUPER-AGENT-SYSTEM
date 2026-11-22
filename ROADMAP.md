@@ -645,7 +645,7 @@ At least one real model can operate the system through the model abstraction.
 
 Status
 
-COMPLETE for the local-model path: the Android GenieX app now hosts the real loopback bridge (foreground service, OpenAI-compatible v2 contract, single-resident NPU models with swap-on-demand), verified on-device with real Qwen3-4B and Qwen2.5-VL inference (TTFT/prefill/decode recorded) AND a real end-to-end SAS task reaching DONE with the real NPU model proposing the tool call through Policy (ADR-018). Cloud provider adapters (DeepSeek/Claude/Gemini) remain optional and need API keys.
+COMPLETE for the local GenieX NPU bridge (ADR-018) AND the cloud REST adapters `DeepSeekModelPort` and `GeminiModelPort` under `src/models/` (ADR-022, stdlib-only `urllib.request`, offline unit/integration suites + opt-in `SAS_LIVE_MODEL_TESTS=1` smoke checks). `ClaudeModelPort` remains optional if needed later.
 
 ---
 

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.12", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run Linux CI gate (ci.sh)
+        if: runner.os == 'Linux'
+        run: sh ./ci.sh
+      - name: Run Windows test suite and Core purity gate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          python -m unittest discover -s tests -t .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "
+          from pathlib import Path
+          forbidden = ('termux', 'android', 'deepseek', 'anthropic', 'claude', 'gemini', 'pi_ultracode')
+          offenders = []
+          for path in sorted(Path('src/core').glob('*.py')):
+              for lineno, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                  if line.strip().startswith(('import ', 'from ')):
+                      for name in forbidden:
+                          if name in line.lower():
+                              offenders.append(f'{path}:{lineno}: {line.strip()}')
+          if offenders:
+              raise SystemExit('\n'.join(offenders))
+          print('core purity OK')
+          "

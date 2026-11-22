@@ -14,34 +14,25 @@ per-role dispatch). A reference implementation (`ScriptedModelPort`) and
 the full integration tests live in `src/models/` and
 `tests/integration/test_model_port_flows.py`.
 
-## Provider adapters (to be implemented — Phase 11)
+## Provider adapters (Phase 11 — implemented for DeepSeek & Gemini)
 
-Planned adapters and their configuration:
+Configured adapters under `src/models/`:
 
-| Adapter | Provider | Environment variable |
-|---|---|---|
-| `DeepSeekModelPort` | api.deepseek.com (Anthropic-compatible) | `DEEPSEEK_API_KEY` |
-| `ClaudeModelPort` | Anthropic Messages API | `ANTHROPIC_API_KEY` |
-| `GeminiModelPort` | Google Gemini API | `GEMINI_API_KEY` |
+| Adapter | Provider / Endpoint | Environment variables | Status |
+|---|---|---|---|
+| `DeepSeekModelPort` | DeepSeek OpenAI-compatible (`/chat/completions`) | `DEEPSEEK_API_KEY` *(required)*, `DEEPSEEK_MODEL` (`deepseek-chat`), `DEEPSEEK_BASE_URL`, `DEEPSEEK_TIMEOUT` | **Implemented** |
+| `GeminiModelPort` | Google Gemini REST (`:generateContent`, `x-goog-api-key` header) | `GEMINI_API_KEY` *(required)*, `GEMINI_MODEL` (`gemini-2.5-flash`), `GEMINI_BASE_URL`, `GEMINI_TIMEOUT` | **Implemented** |
+| `ClaudeModelPort` | Anthropic Messages API | `ANTHROPIC_API_KEY` | Optional / not yet implemented |
 
 Rules for adapter implementations:
 
-1. **Credentials come from environment variables only.** Never write keys
-   into files inside the repository.
-2. **The adapter returns `ModelResponse` objects.** Anything else is
-   malformed and the driver converts it to an empty/malformed response —
-   a failing provider can never produce an action.
-3. **Selection grants no authority** (INTERFACES s15): a stronger model
-   does not get broader permissions, higher limits, or lower verification
-   requirements. All of that is decided by Policy, limits, and the
-   Completion Engine — none of it consults the adapter.
-4. **Every `generate()` call is journaled as `MODEL_CALL`** by the
-   `ModelPortDriver` before the response is used, so `modelCalls` limits
-   are externally enforceable. Do not bypass the driver.
-5. **HTTP clients are allowed inside adapters** (the stdlib-only rule
-   applies to the Core and the governed platform; provider adapters may
-   use `urllib.request` or vendor-specific SDKs). Prefer `urllib.request`
-   to preserve the zero-dependency property.
+1. **Credentials come from environment variables only** (or explicit DI in tests). Never write keys into files inside the repository, never put keys in URL query strings, and never log keys (errors are redacted before storage on `port.last_error`).
+2. **The adapter returns `ModelResponse` objects.** Missing credentials, HTTP errors, timeouts, or malformed payloads set `port.last_error` and return `ModelResponse(content="", toolCalls=[], finishReason="provider_error")` — a failing provider can never crash the governed loop or emit an unauthorized action.
+3. **Selection grants no authority** (INTERFACES s15): `build_deepseek_router()` and `build_gemini_router()` wire roles identically; Policy, resource limits, and the Completion Engine still decide everything.
+4. **Every `generate()` call is journaled as `MODEL_CALL`** by `ModelPortDriver` before the response is used, and normalized `usage["total_tokens"]` feeds `token_budget` enforcement uniformly across Gemini (`usageMetadata`), DeepSeek (`usage`), and GenieX.
+5. **Stdlib-only HTTPS transport (`src/models/_http.py`):** cloud adapters use `urllib.request` with `https://` enforcement for remote hosts (loopback `http://` is allowed for local mocks) so ADR-001's zero-dependency invariant holds.
+
+Live cloud smoke tests in `tests/integration/test_cloud_models_live.py` are skipped during offline CI (`./ci.sh`) and run only when explicitly enabled with `SAS_LIVE_MODEL_TESTS=1` alongside `GEMINI_API_KEY` and/or `DEEPSEEK_API_KEY`.
 
 ## Minimal adapter sketch
 

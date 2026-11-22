@@ -286,3 +286,16 @@ existing approval check. Documented behaviour worth knowing: each
 re-proposal of an unanswered question creates one new pending record, so the
 stall detector is what bounds their growth - an operator can always deny the
 stale reference.
+
+## ADR-022 — Cloud ModelPort adapters: Gemini + DeepSeek (2026-11-22)
+
+**Context:** Phase 11 (`ROADMAP.md`) requires connecting real cloud model providers behind `ModelPort` / `ModelRouter` (`INTERFACES.md` s14/s15) without violating ADR-001 (zero third-party runtime dependencies), Core/governance network isolation, or credential hygiene (`SECURITY.md` s15/s16). `docs/implementation/PROVIDERS.md` previously listed DeepSeek tentatively as "(Anthropic-compatible)".
+
+**Decisions:**
+
+1. **Stdlib-only HTTPS transport confined to `src/models/`.** `src/models/_http.py` implements `post_json()` using `urllib.request`, `ssl`, `json`, and `socket` only, enforcing `https://` for remote endpoints while allowing `http://` on loopback (`127.0.0.1`, `localhost`, `::1`) for offline tests and local proxies. Shared OpenAI/fenced-text tool-call parsing is deduplicated in `_http.py` across `GenieXModelPort`, `DeepSeekModelPort`, and `GeminiModelPort`.
+2. **DeepSeek uses native OpenAI-compatible `/chat/completions`.** `DeepSeekModelPort` targets `POST https://api.deepseek.com/chat/completions` (`DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_TIMEOUT`), matching `GenieXModelPort`'s OpenAI request/response normalization rather than Anthropic Messages translation. `docs/implementation/PROVIDERS.md` is updated accordingly.
+3. **Gemini uses REST `generateContent` with header authentication and schema sanitization.** `GeminiModelPort` targets `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` (`GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_BASE_URL`, `GEMINI_TIMEOUT`), passing the key strictly via the `x-goog-api-key` header (never `?key=` in URL query parameters). Because Gemini `functionCall` parts omit tool call IDs and reject standard JSON Schema metadata keys, `_parse_gemini_response` synthesizes deterministic `gemini_call_{index}` IDs and `sanitize_gemini_schema()` recursively strips unsupported schema keys (`$schema`, `$id`, `$comment`, `$defs`, `definitions`, `additionalProperties`, `default`, `examples`) while preserving identically named object properties.
+4. **Fail-closed error redaction and bounded retries.** `post_json()` never retries `400`/`401`/`403` (`AUTH`/`HTTP`), applies bounded exponential backoff (honoring numeric `Retry-After`) on `429`/`5xx`/`TIMEOUT`/`CONNECTION`, and scrubs any configured secret values before storing `last_error`. Unusable responses or missing keys always return `ModelResponse(content="", toolCalls=[], finishReason="provider_error")` so `ModelPortDriver` keeps the governed loop bounded without crashing or bypassing Policy.
+
+**Consequences:** Cloud and local (`GenieXModelPort`) providers are hot-swappable under identical `PolicyEngine`, `VerificationEngine`, `CompletionEngine`, and `token_budget` enforcement with zero new dependencies. Live cloud calls remain opt-in (`SAS_LIVE_MODEL_TESTS=1`); `.github/workflows/ci.yml` executes the full offline suite and `ci.sh` purity gate across Linux and Windows.
