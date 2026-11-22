@@ -74,6 +74,7 @@ class CanonicalizationTests(unittest.TestCase):
             self.canon.canonicalize(TargetType.RESOURCE, "android_foreground"),
             "ANDROID_FOREGROUND")
 
+    @unittest.skipUnless(os.name == "posix", "Canonicalizer filesystem paths require POSIX root '/'")
     def test_symlink_resolution(self):
         with tempfile.TemporaryDirectory() as tmp:
             os.makedirs(os.path.join(tmp, "real"))

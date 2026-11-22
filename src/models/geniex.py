@@ -15,112 +15,18 @@ provider_error response so the governed loop never crashes.
 """
 from __future__ import annotations
 
-import json
 from typing import Optional
 
-from core import ModelResponse, ToolCall
+from core import ModelResponse
 from core.enums import ModelRole
 
+from ._http import (
+    candidate_json_lines as _candidate_json_lines,
+    parse_openai_response as _parse_openai_response,
+    parse_tool_calls_from_text as _parse_tool_calls_from_text,
+)
 from .model_port import ModelPort
 from .router import ModelRouter
-
-
-def _candidate_json_lines(text: str) -> list:
-    """JSON candidates from model text: bare JSON lines, markdown-fenced
-    block content (```json ... ```), and single-line fences - the forms
-    real models actually emit."""
-    candidates = []
-    inside_fence = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            inside_fence = not inside_fence
-            if "{" in stripped:
-                inner = stripped.split("```", 1)[1].rsplit("```", 1)[0].strip()
-                brace = inner.find("{")
-                if brace >= 0:
-                    candidates.append(inner[brace:])
-            continue
-        if inside_fence or (stripped.startswith("{") and stripped.endswith("}")):
-            candidates.append(stripped)
-    return candidates
-
-
-def _parse_tool_calls_from_text(text: str) -> list:
-    """SAS tool-call text convention (GENIEX_BRIDGE.md v2): when the SDK
-    cannot emit structured tool calls, the model returns JSON lines of
-    tool-call objects (bare or markdown-fenced). Parsed into ToolCalls;
-    Policy still decides."""
-    calls = []
-    for trimmed in _candidate_json_lines(text):
-        if not (trimmed.startswith("{") and trimmed.endswith("}")):
-            continue
-        try:
-            obj = json.loads(trimmed)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        function = obj.get("function") or obj.get("tool_call")
-        if not isinstance(function, dict):
-            continue
-        name = function.get("name")
-        if not isinstance(name, str) or not name:
-            continue
-        arguments = function.get("arguments", {})
-        if isinstance(arguments, str):
-            try:
-                arguments = json.loads(arguments)
-            except json.JSONDecodeError:
-                arguments = {}
-        if not isinstance(arguments, dict):
-            arguments = {}
-        calls.append(ToolCall(
-            id=str(obj.get("id", f"tc-{len(calls)}")),
-            name=name,
-            arguments=arguments,
-        ))
-    return calls
-
-
-def _parse_openai_response(result: dict) -> ModelResponse:
-    """Translate the OpenAI-compatible response into a ModelResponse.
-    Lenient on read (tool-call arguments may be a string or an object);
-    anything unparseable degrades to empty content, never an exception."""
-    content = ""
-    tool_calls = []
-    usage = None
-    finish_reason = "stop"
-    try:
-        choices = result.get("choices") or []
-        if choices:
-            message = choices[0].get("message") or {}
-            content = str(message.get("content") or "")
-            for raw in message.get("tool_calls") or []:
-                if not isinstance(raw, dict):
-                    continue
-                function = raw.get("function") if isinstance(raw.get("function"), dict) else {}
-                arguments = function.get("arguments", {})
-                if isinstance(arguments, str):
-                    try:
-                        arguments = json.loads(arguments)
-                    except json.JSONDecodeError:
-                        arguments = {}
-                if not isinstance(arguments, dict):
-                    arguments = {}
-                tool_calls.append(ToolCall(
-                    id=str(raw.get("id", "")),
-                    name=str(function.get("name", "")),
-                    arguments=arguments,
-                ))
-            finish_reason = str(choices[0].get("finish_reason", "stop"))
-        usage = result.get("usage") if isinstance(result.get("usage"), dict) else None
-    except Exception:
-        return ModelResponse(content="", toolCalls=[], finishReason="provider_error")
-    if not tool_calls and content:
-        tool_calls = _parse_tool_calls_from_text(content)
-    return ModelResponse(content=content, toolCalls=tool_calls, usage=usage,
-                         finishReason=finish_reason)
 
 
 class GenieXModelPort(ModelPort):
